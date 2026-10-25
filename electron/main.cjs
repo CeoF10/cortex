@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, protocol, shell, net } = require('e
 const path = require('path');
 const fs = require('fs');
 const { Readable } = require('stream');
-const { spawn, exec, execFile } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
 const { exportProjectNatively, detectGpuEncoder } = require('./ffmpeg_export.cjs');
 
@@ -12,7 +12,25 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 let mainWindow = null;
 let currentExportSession = null;
 
+// Convierte "30000/1001" en 29.97 sin usar eval()
+function parseFrameRate(rate) {
+  if (!rate || typeof rate !== 'string') return 30;
+  const [num, den] = rate.split('/').map(Number);
+  const fps = den ? num / den : num;
+  return isFinite(fps) && fps > 0 ? Math.round(fps * 100) / 100 : 30;
+}
+
+// Cache de metadatos por ruta para no relanzar ffprobe en cada importación
+const probeCache = new Map();
+
 function getProbeMetadata(filePath) {
+  if (probeCache.has(filePath)) return probeCache.get(filePath);
+  const promise = probeMetadataUncached(filePath);
+  probeCache.set(filePath, promise);
+  return promise;
+}
+
+function probeMetadataUncached(filePath) {
   return new Promise((resolve) => {
     execFile('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath], (err, stdout) => {
       if (err || !stdout) return resolve({ duration: 30, width: 1920, height: 1080, fps: 30 });
@@ -26,7 +44,7 @@ function getProbeMetadata(filePath) {
           duration: Math.round(duration * 100) / 100,
           width: videoStream?.width || 1920,
           height: videoStream?.height || 1080,
-          fps: videoStream?.r_frame_rate ? eval(videoStream.r_frame_rate) : 30
+          fps: parseFrameRate(videoStream?.r_frame_rate)
         });
       } catch (e) {
         resolve({ duration: 30, width: 1920, height: 1080, fps: 30 });
@@ -120,6 +138,11 @@ app.whenReady().then(() => {
                        ext === '.m4a' || ext === '.aac' ? 'audio/mp4' :
                        ext === '.mp4' ? 'video/mp4' :
                        ext === '.webm' ? 'video/webm' :
+                       ext === '.mov' ? 'video/quicktime' :
+                       ext === '.mkv' ? 'video/x-matroska' :
+                       ext === '.flac' ? 'audio/flac' :
+                       ext === '.webp' ? 'image/webp' :
+                       ext === '.gif' ? 'image/gif' :
                        ext === '.png' ? 'image/png' :
                        ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
                        'application/octet-stream';
@@ -188,12 +211,25 @@ ipcMain.handle('dialog:openFiles', async (event, options = {}) => {
 
   if (result.canceled) return [];
 
-  const filesData = await Promise.all(
-    result.filePaths.map(async (filePath) => {
+  return describeFiles(result.filePaths);
+});
+
+const VIDEO_EXTS = ['mp4', 'mov', 'webm', 'mkv', 'avi'];
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif'];
+const AUDIO_EXTS = ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac'];
+
+async function describeFiles(filePaths) {
+  const valid = filePaths.filter((p) => {
+    const ext = path.extname(p).toLowerCase().replace('.', '');
+    return [...VIDEO_EXTS, ...IMAGE_EXTS, ...AUDIO_EXTS].includes(ext) && fs.existsSync(p);
+  });
+
+  return Promise.all(
+    valid.map(async (filePath) => {
       const ext = path.extname(filePath).toLowerCase().replace('.', '');
       let type = 'video';
-      if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) type = 'image';
-      if (['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac'].includes(ext)) type = 'audio';
+      if (IMAGE_EXTS.includes(ext)) type = 'image';
+      if (AUDIO_EXTS.includes(ext)) type = 'audio';
 
       const stats = fs.statSync(filePath);
       const meta = (type === 'video' || type === 'audio') ? await getProbeMetadata(filePath) : { duration: 3 };
@@ -209,8 +245,12 @@ ipcMain.handle('dialog:openFiles', async (event, options = {}) => {
       };
     })
   );
+}
 
-  return filesData;
+// IPC: Describir archivos soltados con arrastrar y soltar
+ipcMain.handle('media:describeFiles', async (event, filePaths) => {
+  if (!Array.isArray(filePaths)) return [];
+  return describeFiles(filePaths.filter((p) => typeof p === 'string'));
 });
 
 // IPC: Guardar archivo MP4 dialog
@@ -257,10 +297,11 @@ ipcMain.handle('media:getWaveform', async (event, filePath) => {
       const numSamples = Math.floor(buf.length / 4);
       if (numSamples === 0) return resolve([]);
 
+      // Vista Float32 directa sobre el buffer (copiado para garantizar alineación de 4 bytes)
+      const raw = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + numSamples * 4));
       let maxVal = 0.0001;
-      const raw = new Float32Array(numSamples);
       for (let i = 0; i < numSamples; i++) {
-        const val = Math.abs(buf.readFloatLE(i * 4));
+        const val = Math.abs(raw[i]);
         raw[i] = val;
         if (val > maxVal) maxVal = val;
       }
@@ -281,24 +322,25 @@ ipcMain.handle('media:getWaveform', async (event, filePath) => {
   });
 });
 
-// IPC: Extraer thumbnail
+// IPC: Extraer thumbnail (execFile evita inyección de comandos con rutas que contengan comillas)
+const thumbnailCache = new Map();
 ipcMain.handle('media:extractThumbnail', async (event, filePath) => {
-  return new Promise((resolve) => {
-    const tmpThumb = path.join(app.getPath('temp'), `thumb_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`);
-    const cmd = `ffmpeg -y -ss 00:00:01 -i "${filePath}" -vframes 1 -q:v 3 -vf "scale=320:-1" "${tmpThumb}"`;
-    exec(cmd, (err) => {
-      if (err || !fs.existsSync(tmpThumb)) {
-        return resolve(null);
+  if (!filePath || typeof filePath !== 'string') return null;
+  if (thumbnailCache.has(filePath)) return thumbnailCache.get(filePath);
+
+  const promise = new Promise((resolve) => {
+    execFile(
+      'ffmpeg',
+      ['-v', 'quiet', '-ss', '1', '-i', filePath, '-frames:v', '1', '-q:v', '3', '-vf', 'scale=320:-1', '-f', 'image2pipe', '-c:v', 'mjpeg', 'pipe:1'],
+      { encoding: 'buffer', maxBuffer: 1024 * 1024 * 8 },
+      (err, stdout) => {
+        if (err || !stdout || stdout.length === 0) return resolve(null);
+        resolve(`data:image/jpeg;base64,${stdout.toString('base64')}`);
       }
-      try {
-        const base64 = fs.readFileSync(tmpThumb).toString('base64');
-        fs.unlinkSync(tmpThumb);
-        resolve(`data:image/jpeg;base64,${base64}`);
-      } catch (e) {
-        resolve(null);
-      }
-    });
+    );
   });
+  thumbnailCache.set(filePath, promise);
+  return promise;
 });
 
 // IPC: Subtítulos automáticos con Python + Whisper
@@ -306,16 +348,15 @@ ipcMain.handle('subtitles:transcribe', async (event, { filePath, model = 'base',
   return new Promise((resolve) => {
     const scriptPath = path.join(__dirname, '../python/transcribe.py');
     const venvPython = path.join(__dirname, '../python/venv/bin/python');
-    const pythonExe = fs.existsSync(venvPython) ? `"${venvPython}"` : 'python3';
-    const cmd = `${pythonExe} "${scriptPath}" --input "${filePath}" --model "${model}" --language "${language}"`;
-    
-    exec(cmd, { maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
+    const pythonExe = fs.existsSync(venvPython) ? venvPython : 'python3';
+    const args = [scriptPath, '--input', String(filePath), '--model', String(model), '--language', String(language)];
+
+    execFile(pythonExe, args, { maxBuffer: 1024 * 1024 * 10 }, (err, stdout) => {
       if (stdout) {
         try {
-          const res = JSON.parse(stdout.trim());
-          return resolve(res);
+          return resolve(JSON.parse(stdout.trim()));
         } catch (e) {
-          // parse error
+          // salida no JSON: se informa abajo
         }
       }
       resolve({

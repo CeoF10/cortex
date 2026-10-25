@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, memo } from 'react';
 import { 
   FolderPlus, 
   Film, 
@@ -17,7 +17,7 @@ import {
 import { formatDuration } from '../utils/timeFormat';
 import { TEXT_PRESETS, SUBTITLE_THEMES, SUBTITLE_BG_MODES } from '../utils/presets';
 
-export default function MediaPanel({
+function MediaPanel({
   activeTab,
   setActiveTab,
   mediaPool,
@@ -32,16 +32,19 @@ export default function MediaPanel({
   activeThemeId,
   activeBgMode = 'black',
   onChangeBgMode,
-  currentTime
+  activeSubtitleId
 }) {
   const [mediaFilter, setMediaFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const filteredMedia = mediaPool.filter((item) => {
-    if (mediaFilter !== 'all' && item.type !== mediaFilter) return false;
-    if (searchQuery.trim() && !item.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    return true;
-  });
+  const filteredMedia = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return mediaPool.filter((item) => {
+      if (mediaFilter !== 'all' && item.type !== mediaFilter) return false;
+      if (query && !item.name.toLowerCase().includes(query)) return false;
+      return true;
+    });
+  }, [mediaPool, mediaFilter, searchQuery]);
 
   return (
     <div className="w-80 h-full bg-[#16161a] border-r border-[#24242c] flex flex-col select-none">
@@ -368,7 +371,7 @@ export default function MediaPanel({
               </div>
             ) : (
               subtitles.map((sub) => {
-                const isActive = currentTime >= sub.start && currentTime <= (sub.start + sub.duration);
+                const isActive = sub.id === activeSubtitleId;
                 return (
                   <div
                     key={sub.id}
@@ -396,3 +399,5 @@ export default function MediaPanel({
     </div>
   );
 }
+
+export default memo(MediaPanel);

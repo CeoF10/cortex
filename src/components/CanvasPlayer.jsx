@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { formatTimecode } from '../utils/timeFormat';
 import { calculateClipAnimation } from '../utils/animations';
+import { isTypingTarget } from '../utils/dom';
 
 export default function CanvasPlayer({
   currentTime,
@@ -35,13 +36,34 @@ export default function CanvasPlayer({
   const renderFrameRef = useRef(null);
 
   // Ref que mantiene la posición exacta de tiempo sin provocar re-renders del bucle
+  // Durante la reproducción el bucle es la fuente de verdad: sincronizar desde props solo en pausa
+  // (si no, un render atrasado puede devolver el cabezal a un frame anterior).
+  // Solo se copia cuando la prop cambia de verdad (un seek), no al re-renderizar con un valor viejo.
   const currentTimeRef = useRef(currentTime);
-  useEffect(() => {
-    currentTimeRef.current = currentTime;
-  }, [currentTime]);
+  const lastPropTimeRef = useRef(currentTime);
+  if (currentTime !== lastPropTimeRef.current) {
+    lastPropTimeRef.current = currentTime;
+    // En reproducción, los valores publicados por el propio bucle van como mucho ~1 frame atrasados;
+    // un salto mayor es un seek del usuario (clic en la regla, J/L, etc.).
+    if (!isPlaying || Math.abs(currentTime - currentTimeRef.current) > 0.25) {
+      currentTimeRef.current = currentTime;
+    }
+  }
+
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
 
   const allClips = useMemo(() => {
     return tracks.flatMap((t) => t.clips);
+  }, [tracks]);
+
+  // Índice clip -> pista silenciada, para no buscar la pista de cada clip en cada frame
+  const mutedClipIds = useMemo(() => {
+    const ids = new Set();
+    tracks.forEach((t) => {
+      if (t.muted) t.clips.forEach((c) => ids.add(c.id));
+    });
+    return ids;
   }, [tracks]);
 
   const getCanvasDimensions = useCallback(() => {
@@ -73,7 +95,7 @@ export default function CanvasPlayer({
           v.src = src;
           v.crossOrigin = 'anonymous';
           v.preload = 'auto';
-          v.muted = isMuted;
+          v.muted = isMutedRef.current;
           v.onloadedmetadata = () => {
             if (v.duration && isFinite(v.duration) && onUpdateClipDuration) {
               onUpdateClipDuration(clip.id, v.duration);
@@ -85,7 +107,7 @@ export default function CanvasPlayer({
           const a = document.createElement('audio');
           a.src = src;
           a.preload = 'auto';
-          a.muted = isMuted;
+          a.muted = isMutedRef.current;
           a.onloadedmetadata = () => {
             if (a.duration && isFinite(a.duration) && onUpdateClipDuration) {
               onUpdateClipDuration(clip.id, a.duration);
@@ -132,7 +154,7 @@ export default function CanvasPlayer({
         map.delete(key);
       }
     }
-  }, [allClips, isMuted, onUpdateClipDuration]);
+  }, [allClips, onUpdateClipDuration]);
 
   // Sincronización de mute
   useEffect(() => {
@@ -466,9 +488,7 @@ export default function CanvasPlayer({
 
   // Cálculo dinámico de volumen con soporte para Mute de pista, Mute de clip, Fade In y Fade Out
   const computeClipVolume = useCallback((clip, curTime) => {
-    if (clip.muted) return 0;
-    const parentTrack = tracks.find((t) => (t.clips || []).some((c) => c.id === clip.id));
-    if (parentTrack && parentTrack.muted) return 0;
+    if (clip.muted || mutedClipIds.has(clip.id)) return 0;
 
     let vol = clip.volume !== undefined ? clip.volume : 1;
     if (vol <= 0.005) return 0;
@@ -480,12 +500,17 @@ export default function CanvasPlayer({
     if (clip.fadeOut && clip.fadeOut > 0 && (clip.duration - relTime) < clip.fadeOut) {
       vol *= Math.max(0, Math.min(1, (clip.duration - relTime) / clip.fadeOut));
     }
-    return Math.max(0, Math.min(1.5, vol));
-  }, [tracks]);
+    // HTMLMediaElement.volume lanza excepción por encima de 1
+    return Math.max(0, Math.min(1, vol));
+  }, [mutedClipIds]);
 
   // Manejo de cambio de estado isPlaying (Play / Pausa)
   useEffect(() => {
     if (!isPlaying) {
+      // Publicar la posición exacta (el estado se actualiza con throttle durante la reproducción)
+      if (currentTimeRef.current !== lastPropTimeRef.current) {
+        setCurrentTime(currentTimeRef.current);
+      }
       // Pausar todos los elementos multimedia de inmediato
       mediaElementsRef.current.forEach((el) => {
         if (el && typeof el.pause === 'function') {
@@ -523,6 +548,9 @@ export default function CanvasPlayer({
 
     let animId;
     let lastTime = performance.now();
+    // El canvas se pinta a 60 FPS, pero el estado de React (timeline, contadores) a ~30 FPS
+    let lastStateSync = 0;
+    const playableClips = allClips.filter((c) => c.type === 'audio' || c.type === 'video');
 
     const loop = (now) => {
       const delta = (now - lastTime) / 1000;
@@ -556,11 +584,13 @@ export default function CanvasPlayer({
       }
 
       currentTimeRef.current = curTime;
-      setCurrentTime(curTime);
+      if (now - lastStateSync >= 33) {
+        lastStateSync = now;
+        setCurrentTime(curTime);
+      }
 
       // 2. Control dinámico de clips: arrancar o pausar según posición en la línea de tiempo
-      allClips.forEach((clip) => {
-        if (clip.type !== 'audio' && clip.type !== 'video') return;
+      playableClips.forEach((clip) => {
         const el = mediaElementsRef.current.get(clip.id) || mediaElementsRef.current.get(clip.url);
         if (!el) return;
 
@@ -608,7 +638,7 @@ export default function CanvasPlayer({
   // Atajos de teclado profesionales (Espacio, J, K, L, Flechas frame por frame, Mute)
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (isTypingTarget(e.target)) return;
 
       if (e.code === 'Space') {
         e.preventDefault();

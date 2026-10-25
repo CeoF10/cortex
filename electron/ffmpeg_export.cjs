@@ -1,4 +1,4 @@
-const { spawn, execSync } = require('child_process');
+const { spawn, execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -54,8 +54,9 @@ function hasAudioStream(filePath) {
   if (audioStreamCache.has(filePath)) return audioStreamCache.get(filePath);
 
   try {
-    const out = execSync(
-      `ffprobe -v error -select_streams a:0 -show_entries stream=codec_type -of default=nw=1:nk=1 "${filePath}"`,
+    const out = execFileSync(
+      'ffprobe',
+      ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type', '-of', 'default=nw=1:nk=1', filePath],
       { encoding: 'utf8', timeout: 3000 }
     );
     const hasAudio = out.trim() === 'audio';

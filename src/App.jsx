@@ -8,6 +8,12 @@ import PropertiesPanel from './components/PropertiesPanel';
 import AutoSubtitleModal from './components/AutoSubtitleModal';
 import ExportModal from './components/ExportModal';
 import { SUBTITLE_THEMES, SUBTITLE_BG_MODES } from './utils/presets';
+import { isTypingTarget } from './utils/dom';
+
+const STORAGE_KEY = 'capcut_projects_v2';
+const HISTORY_LIMIT = 50;
+const HISTORY_COALESCE_MS = 400;
+const SAVE_DEBOUNCE_MS = 600;
 
 const DEFAULT_PROJECTS = [
   {
@@ -109,7 +115,7 @@ export default function App() {
   // Lista de proyectos almacenados en localStorage con sanitización automática de URLs locales
   const [projects, setProjects] = useState(() => {
     try {
-      const saved = localStorage.getItem('capcut_projects_v2');
+      const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed.map(sanitizeProject);
@@ -138,73 +144,86 @@ export default function App() {
   const [activeThemeId, setActiveThemeId] = useState('theme_blue_electric');
   const [activeBgMode, setActiveBgMode] = useState('black');
 
-  // Historial de cambios para Deshacer / Rehacer (Undo / Redo)
-  const [history, setHistory] = useState({
-    past: [],
-    future: []
-  });
+  // Historial de cambios para Deshacer / Rehacer (Undo / Redo).
+  // Se guarda en refs para no re-renderizar en cada push; solo se expone canUndo/canRedo.
+  // Los cambios consecutivos en menos de HISTORY_COALESCE_MS (arrastrar, recortar, sliders)
+  // se agrupan en un único paso de deshacer.
+  const tracksRef = useRef(tracks);
+  const historyRef = useRef({ past: [], future: [], lastPush: 0 });
+  const [historyFlags, setHistoryFlags] = useState({ canUndo: false, canRedo: false });
+
+  const syncHistoryFlags = useCallback(() => {
+    const { past, future } = historyRef.current;
+    setHistoryFlags((prev) =>
+      prev.canUndo === past.length > 0 && prev.canRedo === future.length > 0
+        ? prev
+        : { canUndo: past.length > 0, canRedo: future.length > 0 }
+    );
+  }, []);
+
+  const resetTracks = useCallback((nextTracks) => {
+    tracksRef.current = nextTracks;
+    historyRef.current = { past: [], future: [], lastPush: 0 };
+    setTracks(nextTracks);
+    syncHistoryFlags();
+  }, [syncHistoryFlags]);
 
   const updateTracks = useCallback((action, addToHistory = true) => {
-    setTracks((prevTracks) => {
-      const nextTracks = typeof action === 'function' ? action(prevTracks) : action;
-      if (addToHistory && nextTracks !== prevTracks) {
-        setHistory((prevHist) => ({
-          past: [...prevHist.past.slice(-30), prevTracks],
-          future: []
-        }));
+    const prevTracks = tracksRef.current;
+    const nextTracks = typeof action === 'function' ? action(prevTracks) : action;
+    if (nextTracks === prevTracks) return;
+
+    if (addToHistory) {
+      const hist = historyRef.current;
+      const now = performance.now();
+      if (now - hist.lastPush > HISTORY_COALESCE_MS || hist.past.length === 0) {
+        hist.past = [...hist.past.slice(-(HISTORY_LIMIT - 1)), prevTracks];
       }
-      return nextTracks;
-    });
-  }, []);
+      hist.lastPush = now;
+      hist.future = [];
+      syncHistoryFlags();
+    }
+
+    tracksRef.current = nextTracks;
+    setTracks(nextTracks);
+  }, [syncHistoryFlags]);
 
   const handleUndo = useCallback(() => {
-    setHistory((prevHist) => {
-      if (prevHist.past.length === 0) return prevHist;
-      const previous = prevHist.past[prevHist.past.length - 1];
-      const newPast = prevHist.past.slice(0, -1);
-
-      setTracks((currentTracks) => {
-        setHistory((h) => ({
-          past: newPast,
-          future: [currentTracks, ...h.future]
-        }));
-        return previous;
-      });
-
-      return prevHist;
-    });
-  }, []);
+    const hist = historyRef.current;
+    if (hist.past.length === 0) return;
+    const previous = hist.past[hist.past.length - 1];
+    hist.past = hist.past.slice(0, -1);
+    hist.future = [tracksRef.current, ...hist.future];
+    hist.lastPush = 0;
+    tracksRef.current = previous;
+    setTracks(previous);
+    syncHistoryFlags();
+  }, [syncHistoryFlags]);
 
   const handleRedo = useCallback(() => {
-    setHistory((prevHist) => {
-      if (prevHist.future.length === 0) return prevHist;
-      const nextState = prevHist.future[0];
-      const newFuture = prevHist.future.slice(1);
+    const hist = historyRef.current;
+    if (hist.future.length === 0) return;
+    const nextState = hist.future[0];
+    hist.future = hist.future.slice(1);
+    hist.past = [...hist.past, tracksRef.current];
+    hist.lastPush = 0;
+    tracksRef.current = nextState;
+    setTracks(nextState);
+    syncHistoryFlags();
+  }, [syncHistoryFlags]);
 
-      setTracks((currentTracks) => {
-        setHistory((h) => ({
-          past: [...h.past, currentTracks],
-          future: newFuture
-        }));
-        return nextState;
-      });
-
-      return prevHist;
-    });
-  }, []);
+  // Ref del cabezal para que los callbacks no cambien de identidad en cada frame
+  const currentTimeRef = useRef(currentTime);
+  currentTimeRef.current = currentTime;
 
   // Atajos globales Ctrl+Z y Ctrl+Y
   useEffect(() => {
     const handleUndoRedoKeys = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (isTypingTarget(e.target)) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
-        if (e.shiftKey) {
-          e.preventDefault();
-          handleRedo();
-        } else {
-          e.preventDefault();
-          handleUndo();
-        }
+        e.preventDefault();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
       } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
         e.preventDefault();
         handleRedo();
@@ -220,12 +239,38 @@ export default function App() {
 
   const canvasRef = useRef(null);
 
-  // Guardar proyectos en localStorage automáticamente
-  useEffect(() => {
+  // Guardar proyectos en localStorage con debounce: serializar todo el proyecto
+  // en cada mousemove de un arrastre bloqueaba el hilo principal.
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  const [saveState, setSaveState] = useState('saved'); // 'saved' | 'pending' | 'error'
+
+  const persistProjects = useCallback(() => {
     try {
-      localStorage.setItem('capcut_projects_v2', JSON.stringify(projects));
-    } catch (e) {}
-  }, [projects]);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(projectsRef.current));
+      setSaveState('saved');
+    } catch (e) {
+      console.error('No se pudo guardar el proyecto:', e);
+      setSaveState('error');
+    }
+  }, []);
+
+  const isFirstSaveRef = useRef(true);
+  useEffect(() => {
+    if (isFirstSaveRef.current) {
+      isFirstSaveRef.current = false;
+      return;
+    }
+    setSaveState('pending');
+    const timer = setTimeout(persistProjects, SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [projects, persistProjects]);
+
+  // Asegurar el guardado al cerrar la ventana
+  useEffect(() => {
+    window.addEventListener('beforeunload', persistProjects);
+    return () => window.removeEventListener('beforeunload', persistProjects);
+  }, [persistProjects]);
 
   // Calcular duración total dinámicamente
   const totalDuration = useMemo(() => {
@@ -287,7 +332,7 @@ export default function App() {
     setProjectName(newProj.name);
     setAspectRatio(newProj.aspectRatio);
     setMediaPool([]);
-    setTracks(newProj.tracks);
+    resetTracks(newProj.tracks);
     setCurrentTime(0);
     setIsPlaying(false);
     setSelectedClipId(null);
@@ -308,7 +353,7 @@ export default function App() {
     setProjectName(proj.name);
     setAspectRatio(proj.aspectRatio || '16:9');
     setMediaPool(proj.mediaPool || []);
-    setTracks(
+    resetTracks(
       proj.tracks && proj.tracks.length > 0
         ? proj.tracks
         : [
@@ -342,43 +387,46 @@ export default function App() {
   };
 
   // Volver a la pantalla de proyectos
-  const handleGoHome = () => {
+  const handleGoHome = useCallback(() => {
     setIsPlaying(false);
+    persistProjects();
     setViewMode('home');
-  };
+  }, [persistProjects]);
+
+  // Completar metadatos de los archivos importados. El proceso principal ya calcula la
+  // duración con ffprobe, así que aquí solo se generan miniaturas (en paralelo).
+  const addFilesToMediaPool = useCallback(async (files) => {
+    if (!files || files.length === 0) return;
+    const processedFiles = await Promise.all(
+      files.map(async (file) => {
+        const url = normalizeMediaUrl(file.url, file.path);
+        let thumbnail = null;
+        if (file.type === 'video') {
+          thumbnail = await window.capcutAPI.extractThumbnail(file.path).catch(() => null);
+        } else if (file.type === 'image') {
+          thumbnail = url;
+        }
+        return {
+          ...file,
+          url,
+          duration: file.duration || (file.type === 'image' ? 3 : 30),
+          thumbnail
+        };
+      })
+    );
+    setMediaPool((prev) => {
+      // Evitar duplicados del mismo archivo en la biblioteca
+      const known = new Set(prev.map((m) => m.path));
+      return [...prev, ...processedFiles.filter((f) => !known.has(f.path))];
+    });
+  }, []);
 
   // Importar archivos multimedia
-  const handleImportFiles = async () => {
+  const handleImportFiles = useCallback(async () => {
     if (window.capcutAPI?.openFiles) {
       try {
         const files = await window.capcutAPI.openFiles();
-        if (files && files.length > 0) {
-          const processedFiles = await Promise.all(
-            files.map(async (file) => {
-              let duration = file.duration || (file.type === 'image' ? 3 : 30);
-              let thumbnail = null;
-
-              if (file.type === 'video') {
-                const meta = await window.capcutAPI.getMediaMetadata(file.path);
-                if (meta && meta.duration) duration = meta.duration;
-                thumbnail = await window.capcutAPI.extractThumbnail(file.path);
-              } else if (file.type === 'audio') {
-                const meta = await window.capcutAPI.getMediaMetadata(file.path);
-                if (meta && meta.duration) duration = meta.duration;
-              } else if (file.type === 'image') {
-                thumbnail = normalizeMediaUrl(file.url, file.path);
-              }
-
-              return {
-                ...file,
-                url: normalizeMediaUrl(file.url, file.path),
-                duration,
-                thumbnail
-              };
-            })
-          );
-          setMediaPool((prev) => [...prev, ...processedFiles]);
-        }
+        await addFilesToMediaPool(files);
       } catch (err) {
         console.error('Error importando archivos:', err);
       }
@@ -394,36 +442,79 @@ export default function App() {
       };
       setMediaPool((prev) => [...prev, mockItem]);
     }
-  };
+  }, [addFilesToMediaPool]);
 
-  // Actualizar automáticamente la duración real de un clip cuando el navegador carga metadatos
-  const handleUpdateClipDuration = (clipId, newDuration) => {
-    if (!newDuration || isNaN(newDuration) || newDuration <= 0) return;
-    const rounded = Math.round(newDuration * 100) / 100;
-    setTracks((prevTracks) => {
+  // Importar arrastrando archivos desde el explorador del sistema
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const dragDepthRef = useRef(0);
+
+  const handleDragEnter = useCallback((e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDraggingFiles(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDraggingFiles(false);
+  }, []);
+
+  const handleDragOver = useCallback((e) => {
+    if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+  }, []);
+
+  const handleDrop = useCallback(async (e) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDraggingFiles(false);
+    const api = window.capcutAPI;
+    if (!api?.getPathForFile || !api?.describeFiles) return;
+    try {
+      const paths = Array.from(e.dataTransfer.files).map((f) => api.getPathForFile(f)).filter(Boolean);
+      const files = await api.describeFiles(paths);
+      await addFilesToMediaPool(files);
+      setActiveTab('media');
+    } catch (err) {
+      console.error('Error importando archivos arrastrados:', err);
+    }
+  }, [addFilesToMediaPool]);
+
+  // Cuando el navegador carga los metadatos reales, recortar el clip solo si excede el
+  // final del archivo. Antes se sobrescribía la duración y se perdían cortes y recortes.
+  const handleUpdateClipDuration = useCallback((clipId, mediaDuration) => {
+    if (!mediaDuration || isNaN(mediaDuration) || mediaDuration <= 0) return;
+    updateTracks((prevTracks) => {
       let changed = false;
-      const next = prevTracks.map((t) => ({
-        ...t,
-        clips: t.clips.map((c) => {
-          if (c.id !== clipId) return c;
-          if (Math.abs(c.duration - rounded) < 0.1) return c;
-          changed = true;
-          return { ...c, duration: rounded };
-        })
-      }));
+      const next = prevTracks.map((t) => {
+        if (!t.clips.some((c) => c.id === clipId)) return t;
+        return {
+          ...t,
+          clips: t.clips.map((c) => {
+            if (c.id !== clipId) return c;
+            const available = (mediaDuration - (c.offset || 0)) / (c.speed || 1);
+            const maxDur = Math.round(available * 100) / 100;
+            if (maxDur <= 0.1 || c.duration <= maxDur + 0.05) return c;
+            changed = true;
+            return { ...c, duration: maxDur };
+          })
+        };
+      });
       return changed ? next : prevTracks;
-    });
-  };
+    }, false);
+  }, [updateTracks]);
 
   // Añadir medio a cualquiera de las pistas universales (con pegado automático y pista de superposición)
-  const handleAddMediaToTimeline = (mediaItem) => {
+  const handleAddMediaToTimeline = useCallback((mediaItem) => {
     const clipDuration = (mediaItem.duration && mediaItem.duration > 0)
       ? mediaItem.duration
       : (mediaItem.type === 'image' ? 5.0 : 30);
 
-    let finalStart = Math.round(currentTime * 100) / 100;
+    let finalStart = Math.round(currentTimeRef.current * 100) / 100;
 
-    setTracks((prevTracks) => {
+    updateTracks((prevTracks) => {
       let workingTracks = [...prevTracks];
 
       if (workingTracks.length === 0) {
@@ -506,14 +597,14 @@ export default function App() {
         return t;
       });
     });
-  };
+  }, [updateTracks]);
 
   // Añadir texto a las pistas universales (con pegado automático)
-  const handleAddTextToTimeline = (preset = null) => {
-    let finalStart = Math.round(currentTime * 100) / 100;
+  const handleAddTextToTimeline = useCallback((preset = null) => {
+    let finalStart = Math.round(currentTimeRef.current * 100) / 100;
     const duration = 3.0;
 
-    setTracks((prevTracks) => {
+    updateTracks((prevTracks) => {
       const targetTrack = prevTracks[0];
       if (targetTrack && targetTrack.clips.length > 0) {
         for (const c of targetTrack.clips) {
@@ -553,18 +644,18 @@ export default function App() {
         return t;
       });
     });
-  };
+  }, [updateTracks]);
 
   // Eliminar de biblioteca
-  const handleDeleteMedia = (mediaId) => {
+  const handleDeleteMedia = useCallback((mediaId) => {
     setMediaPool((prev) => prev.filter((m) => m.id !== mediaId));
-  };
+  }, []);
 
   // Aplicar tema de subtítulo viral (TikTok Azul, Amarillo, etc.) con el modo de fondo activo o especificado
-  const handleApplySubtitleTheme = (theme, bgMode = activeBgMode) => {
+  const handleApplySubtitleTheme = useCallback((theme, bgMode = activeBgMode) => {
     setActiveThemeId(theme.id);
     const bgConfig = SUBTITLE_BG_MODES.find((b) => b.id === bgMode) || SUBTITLE_BG_MODES[0];
-    setTracks((prevTracks) =>
+    updateTracks((prevTracks) =>
       prevTracks.map((t) => ({
         ...t,
         clips: t.clips.map((c) => {
@@ -585,17 +676,17 @@ export default function App() {
         })
       }))
     );
-  };
+  }, [activeBgMode, updateTracks]);
 
   // Cambiar modo de fondo para todos los subtítulos (Negro, Blanco fácil lectura, Transparente, Azul noche)
-  const handleChangeBgMode = (newBgMode) => {
+  const handleChangeBgMode = useCallback((newBgMode) => {
     setActiveBgMode(newBgMode);
     const activeTheme = SUBTITLE_THEMES.find((th) => th.id === activeThemeId) || SUBTITLE_THEMES[0];
     handleApplySubtitleTheme(activeTheme, newBgMode);
-  };
+  }, [activeThemeId, handleApplySubtitleTheme]);
 
   // Aplicar subtítulos automáticos con el tema viral activo y el modo de fondo seleccionado
-  const handleApplySubtitles = (generatedSubtitles) => {
+  const handleApplySubtitles = useCallback((generatedSubtitles) => {
     const activeTheme = SUBTITLE_THEMES.find((th) => th.id === activeThemeId) || SUBTITLE_THEMES[0];
     const bgConfig = SUBTITLE_BG_MODES.find((b) => b.id === activeBgMode) || SUBTITLE_BG_MODES[0];
 
@@ -617,7 +708,7 @@ export default function App() {
     }));
 
     // Insertar en la primera pista
-    setTracks((prevTracks) => {
+    updateTracks((prevTracks) => {
       if (prevTracks.length === 0) {
         return [{ id: 'track_1', name: 'Pista 1', clips: universalSubClips }];
       }
@@ -630,17 +721,28 @@ export default function App() {
     });
 
     setActiveTab('subtitles');
-  };
+  }, [activeThemeId, activeBgMode, updateTracks]);
 
   // Subtítulos activos
   const allSubtitles = useMemo(() => {
     return tracks.flatMap((t) => t.clips.filter((c) => c.type === 'text' && c.isSubtitle));
   }, [tracks]);
 
-  const handleSelectSubtitle = (sub) => {
+  // Solo el id del subtítulo activo llega al panel lateral, así no se re-renderiza en cada frame
+  const activeSubtitleId = useMemo(() => {
+    const active = allSubtitles.find((sub) => currentTime >= sub.start && currentTime <= sub.start + sub.duration);
+    return active ? active.id : null;
+  }, [allSubtitles, currentTime]);
+
+  const handleSelectSubtitle = useCallback((sub) => {
     setSelectedClipId(sub.id);
     setCurrentTime(sub.start);
-  };
+  }, []);
+
+  const openSubtitleModal = useCallback(() => setIsSubtitleModalOpen(true), []);
+  const closeSubtitleModal = useCallback(() => setIsSubtitleModalOpen(false), []);
+  const openExportModal = useCallback(() => setIsExportModalOpen(true), []);
+  const closeExportModal = useCallback(() => setIsExportModalOpen(false), []);
 
   // 1. Si estamos en modo 'home', mostrar Hub de Proyectos
   if (viewMode === 'home') {
@@ -657,7 +759,22 @@ export default function App() {
 
   // 2. Si estamos en modo 'editor', mostrar CapCut Desktop Editor
   return (
-    <div className="w-screen h-screen flex flex-col bg-[#0e0e11] text-gray-100 overflow-hidden font-sans">
+    <div
+      className="w-screen h-screen flex flex-col bg-[#0e0e11] text-gray-100 overflow-hidden font-sans relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {isDraggingFiles && (
+        <div className="absolute inset-0 z-[100] bg-cyan-500/10 backdrop-blur-sm border-4 border-dashed border-cyan-400/70 flex items-center justify-center pointer-events-none">
+          <div className="bg-[#16161a]/95 px-8 py-6 rounded-2xl border border-cyan-500/40 shadow-2xl text-center">
+            <p className="text-lg font-bold text-cyan-300">Suelta para importar</p>
+            <p className="text-xs text-gray-400 mt-1">Videos, fotos y audios se añadirán a la biblioteca</p>
+          </div>
+        </div>
+      )}
+
       {/* Barra Superior con botón para volver a Proyectos */}
       <Navbar
         projectName={projectName}
@@ -668,11 +785,12 @@ export default function App() {
         setIsPlaying={setIsPlaying}
         aspectRatio={aspectRatio}
         setAspectRatio={setAspectRatio}
-        onOpenAutoSubtitles={() => setIsSubtitleModalOpen(true)}
-        onOpenExport={() => setIsExportModalOpen(true)}
+        onOpenAutoSubtitles={openSubtitleModal}
+        onOpenExport={openExportModal}
         onGoHome={handleGoHome}
-        canUndo={history.past.length > 0}
-        canRedo={history.future.length > 0}
+        saveState={saveState}
+        canUndo={historyFlags.canUndo}
+        canRedo={historyFlags.canRedo}
         onUndo={handleUndo}
         onRedo={handleRedo}
       />
@@ -688,13 +806,13 @@ export default function App() {
           onAddTextToTimeline={handleAddTextToTimeline}
           onDeleteMedia={handleDeleteMedia}
           subtitles={allSubtitles}
-          onOpenAutoSubtitles={() => setIsSubtitleModalOpen(true)}
+          onOpenAutoSubtitles={openSubtitleModal}
           onSelectSubtitle={handleSelectSubtitle}
           onApplySubtitleTheme={handleApplySubtitleTheme}
           activeThemeId={activeThemeId}
           activeBgMode={activeBgMode}
           onChangeBgMode={handleChangeBgMode}
-          currentTime={currentTime}
+          activeSubtitleId={activeSubtitleId}
         />
 
         <CanvasPlayer
@@ -729,19 +847,20 @@ export default function App() {
         setSelectedClipId={setSelectedClipId}
         zoom={zoom}
         setZoom={setZoom}
+        isPlaying={isPlaying}
       />
 
       {/* Modales */}
       <AutoSubtitleModal
         isOpen={isSubtitleModalOpen}
-        onClose={() => setIsSubtitleModalOpen(false)}
+        onClose={closeSubtitleModal}
         mediaPool={mediaPool}
         onApplySubtitles={handleApplySubtitles}
       />
 
       <ExportModal
         isOpen={isExportModalOpen}
-        onClose={() => setIsExportModalOpen(false)}
+        onClose={closeExportModal}
         totalDuration={totalDuration}
         aspectRatio={aspectRatio}
         tracks={tracks}

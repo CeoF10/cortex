@@ -1,7 +1,10 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('capcutAPI', {
   openFiles: (options) => ipcRenderer.invoke('dialog:openFiles', options),
+  // Desde Electron 32, File.path ya no existe: se obtiene la ruta con webUtils
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+  describeFiles: (filePaths) => ipcRenderer.invoke('media:describeFiles', filePaths),
   saveFileDialog: (defaultName) => ipcRenderer.invoke('dialog:saveFile', defaultName),
   getMediaMetadata: (filePath) => ipcRenderer.invoke('media:getMetadata', filePath),
   getWaveform: (filePath) => ipcRenderer.invoke('media:getWaveform', filePath),

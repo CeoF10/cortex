@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { 
   Sliders, 
   Type, 
@@ -22,7 +22,7 @@ import { formatDuration } from '../utils/timeFormat';
 import { ANIMATION_LIST } from '../utils/animations';
 import { VIRAL_FONTS, BACKGROUND_PRESETS } from '../utils/presets';
 
-export default function PropertiesPanel({
+function PropertiesPanel({
   selectedClipId,
   tracks,
   setTracks,
@@ -931,3 +931,5 @@ export default function PropertiesPanel({
     </div>
   );
 }
+
+export default memo(PropertiesPanel);

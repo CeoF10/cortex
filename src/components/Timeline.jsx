@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo, memo } from 'react';
 import { 
   Scissors, 
   Trash2, 
@@ -19,10 +19,13 @@ import {
   Magnet,
   Split,
   SkipBack,
-  SkipForward
+  SkipForward,
+  ArrowLeftToLine,
+  ArrowRightToLine
 } from 'lucide-react';
 import { formatTimecode } from '../utils/timeFormat';
 import AudioWaveform from './AudioWaveform';
+import { isTypingTarget } from '../utils/dom';
 
 const formatRulerTime = (seconds) => {
   if (seconds >= 60) {
@@ -33,6 +36,163 @@ const formatRulerTime = (seconds) => {
   return `${Math.round(seconds * 10) / 10}s`;
 };
 
+// Pista memoizada: solo se re-renderiza cuando cambian sus clips, el zoom o la selección,
+// no cuando se mueve el cabezal (que ocurre ~30 veces por segundo al reproducir).
+const TrackLane = memo(function TrackLane({
+  track,
+  zoom,
+  selectedClipId,
+  onClipMouseDown,
+  onTrimStart,
+  onAutoExpand
+}) {
+  return (
+    <div
+      data-track-id={track.id}
+      className="h-14 border-b border-[#1f1f28] relative bg-[#121217]/40 hover:bg-[#15151c]/60 transition-colors"
+    >
+      {track.clips.map((clip) => {
+        const left = clip.start * zoom;
+        const actualWidth = clip.duration * zoom;
+        const width = Math.max(6, actualWidth);
+        const isSelected = selectedClipId === clip.id;
+
+        // Estilo según el tipo de clip dentro de la pista universal
+        let clipBg = 'bg-[#1b2b36] hover:bg-[#203442] border-[#294c63] text-gray-200';
+        let icon = <Film className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />;
+
+        if (clip.type === 'image') {
+          clipBg = 'bg-[#153430] hover:bg-[#1b433e] border-[#235851] text-teal-100';
+          icon = <ImageIcon className="w-3.5 h-3.5 text-teal-400 flex-shrink-0" />;
+        } else if (clip.type === 'audio') {
+          clipBg = 'bg-[#0f1f2c] hover:bg-[#132838] border-[#1b435a] text-cyan-200';
+          icon = <Music className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />;
+        } else if (clip.type === 'text') {
+          clipBg = 'bg-purple-900/40 hover:bg-purple-900/60 border-purple-800/60 text-purple-200';
+          icon = <Type className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />;
+        }
+
+        return (
+          <div
+            key={clip.id}
+            style={{ left: `${left}px`, width: `${width}px` }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => onClipMouseDown(e, clip, track.id)}
+            className={`absolute top-2 bottom-2 rounded-lg cursor-grab active:cursor-grabbing border flex items-center px-1 select-none overflow-hidden transition-shadow ${clipBg} ${
+              isSelected
+                ? 'border-cyan-400 ring-2 ring-cyan-400/50 shadow-lg shadow-cyan-500/20 text-white z-20'
+                : ''
+            }`}
+          >
+            {/* Handle izquierdo (solo si hay suficiente espacio para manipularlo) */}
+            {width >= 20 && (
+              <div
+                onMouseDown={(e) => onTrimStart(e, clip, track.id, 'left')}
+                className="absolute left-0 top-0 bottom-0 w-2.5 bg-white/10 hover:bg-cyan-400 cursor-ew-resize rounded-l z-20"
+              />
+            )}
+
+            {/* Forma de onda de audio de alta fidelidad si es clip de sonido */}
+            {clip.type === 'audio' && (
+              <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                <AudioWaveform
+                  clip={clip}
+                  zoom={zoom}
+                  height={48}
+                  color={isSelected ? '#38bdf8' : '#00F0FF'}
+                  muted={track.muted}
+                />
+              </div>
+            )}
+
+            {/* Mini forma de onda de audio en la parte inferior si es un video */}
+            {clip.type === 'video' && (
+              <div className="absolute bottom-0 left-0 right-0 h-4 opacity-50 pointer-events-none overflow-hidden">
+                <AudioWaveform
+                  clip={clip}
+                  zoom={zoom}
+                  height={16}
+                  color="#38BDF8"
+                  muted={track.muted}
+                />
+              </div>
+            )}
+
+            {/* Contenido del clip con etiquetas responsivas que no se rompen con zoom mínimo */}
+            {clip.type === 'text' ? (
+              <div className="flex items-center px-1.5 w-full h-full pointer-events-none z-10 select-none overflow-hidden">
+                {width >= 75 && (
+                  <div className="p-0.5 rounded bg-purple-950/70 border border-purple-500/30 flex-shrink-0 mr-1.5 shadow-sm">
+                    <Type className="w-3 h-3 text-purple-300" />
+                  </div>
+                )}
+                <span className="text-[11px] font-semibold text-purple-100 truncate flex-1 drop-shadow-sm tracking-wide">
+                  {clip.text || clip.name || 'Subtítulo'}
+                </span>
+                {width >= 90 && (
+                  <span className="text-[9px] font-mono text-purple-300/80 ml-1 flex-shrink-0 bg-purple-950/60 px-1 py-0.5 rounded">
+                    {clip.duration.toFixed(1)}s
+                  </span>
+                )}
+              </div>
+            ) : width >= 32 ? (
+              <div className="flex items-center space-x-1.5 truncate pointer-events-none z-10 flex-1 px-1">
+                {clip.thumbnail ? (
+                  <img
+                    src={clip.thumbnail}
+                    alt=""
+                    className="w-7 h-7 object-cover rounded flex-shrink-0 border border-black/40 shadow-sm"
+                  />
+                ) : (
+                  <div className="p-0.5 rounded bg-black/50 backdrop-blur-sm flex-shrink-0">
+                    {icon}
+                  </div>
+                )}
+                <div className="truncate flex-1">
+                  <div className="flex items-center space-x-1 truncate">
+                    <span className="text-[11px] font-bold truncate bg-black/60 backdrop-blur-sm px-1 py-0.2 rounded shadow-sm">
+                      {clip.name || clip.text || 'Elemento'}
+                    </span>
+                    {width >= 80 && clip.animIn && clip.animIn !== 'none' && (
+                      <span className="px-1 py-0.2 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded text-[7px] font-mono uppercase backdrop-blur-sm">
+                        In: {clip.animIn}
+                      </span>
+                    )}
+                  </div>
+                  {width >= 60 && (
+                    <p className="text-[9px] opacity-80 font-mono mt-0.5">
+                      <span className="bg-black/60 backdrop-blur-sm px-1 py-0.2 rounded">
+                        {clip.duration.toFixed(1)}s
+                      </span>
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : width >= 14 ? (
+              <div className="w-full flex items-center justify-center pointer-events-none z-10 opacity-70">
+                {icon}
+              </div>
+            ) : null}
+
+            {/* Handle derecho (solo si hay suficiente espacio para manipularlo) */}
+            {width >= 20 && (
+              <div
+                title="Arrastra para recortar/expandir. Doble clic para expandir automáticamente hasta el final del audio/video"
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  onAutoExpand(clip);
+                }}
+                onMouseDown={(e) => onTrimStart(e, clip, track.id, 'right')}
+                className="absolute right-0 top-0 bottom-0 w-2.5 bg-white/10 hover:bg-cyan-400 cursor-ew-resize rounded-r z-20 group-hover:bg-white/20"
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
 export default function Timeline({
   currentTime,
   setCurrentTime,
@@ -42,9 +202,17 @@ export default function Timeline({
   selectedClipId,
   setSelectedClipId,
   zoom,
-  setZoom
+  setZoom,
+  isPlaying = false
 }) {
   const containerRef = useRef(null);
+
+  // Refs con los valores más recientes para handlers de ratón/teclado sin recrearlos en cada frame
+  const tracksRef = useRef(tracks);
+  tracksRef.current = tracks;
+  const currentTimeRef = useRef(currentTime);
+  currentTimeRef.current = currentTime;
+  const clipboardRef = useRef(null);
   const scrollContainerRef = useRef(null);
   const leftSidebarRef = useRef(null);
   const pendingScrollAnchorRef = useRef(null);
@@ -201,6 +369,7 @@ export default function Timeline({
 
     // Clic izquierdo estándar en la regla o fondo de pista -> Posicionar cabezal
     if (e.button === 0) {
+      setSelectedClipId(null);
       setIsScrubbing(true);
       updatePlayheadPosition(e);
     }
@@ -292,7 +461,7 @@ export default function Timeline({
   // Auto-expandir un clip (ej. foto o subtítulo) exactamente hasta el final del audio o video
   const handleAutoExpandToEnd = useCallback((clipToExpand) => {
     let maxMediaEnd = 0;
-    tracks.forEach((t) => {
+    tracksRef.current.forEach((t) => {
       t.clips.forEach((c) => {
         if (c.id === clipToExpand.id) return;
         const end = c.start + c.duration;
@@ -312,7 +481,63 @@ export default function Timeline({
         clips: t.clips.map((c) => (c.id === clipToExpand.id ? { ...c, duration: newDur } : c))
       }))
     );
-  }, [tracks, totalDuration, setTracks]);
+  }, [totalDuration, setTracks]);
+
+  // Inicio de arrastre de un clip
+  const handleClipMouseDown = useCallback((e, clip, trackId) => {
+    if (e.button !== 0) return; // botón central: dejar que el contenedor haga paneo
+    e.stopPropagation();
+    setSelectedClipId(clip.id);
+    setDraggingClip({
+      id: clip.id,
+      trackId,
+      initialMouseX: e.clientX,
+      initialStart: clip.start,
+      duration: clip.duration
+    });
+  }, [setSelectedClipId]);
+
+  // Inicio de recorte por el borde izquierdo o derecho
+  const handleTrimStart = useCallback((e, clip, trackId, edge) => {
+    if (e.button !== 0) return; // botón central: dejar que el contenedor haga paneo
+    e.stopPropagation();
+    setSelectedClipId(clip.id);
+    setTrimmingClip({
+      id: clip.id,
+      trackId,
+      edge,
+      initialMouseX: e.clientX,
+      initialStart: clip.start,
+      initialDuration: clip.duration,
+      initialOffset: clip.offset || 0
+    });
+  }, [setSelectedClipId]);
+
+  // Selección por pista: así solo se re-renderizan las pistas cuya selección cambia
+  const trackSelection = useMemo(() => {
+    const map = new Map();
+    if (!selectedClipId) return map;
+    for (const t of tracks) {
+      if (t.clips.some((c) => c.id === selectedClipId)) {
+        map.set(t.id, selectedClipId);
+        break;
+      }
+    }
+    return map;
+  }, [tracks, selectedClipId]);
+
+  // Seguir el cabezal durante la reproducción (paginado, como CapCut)
+  useEffect(() => {
+    if (!isPlaying || isScrubbing) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const playheadPx = currentTime * zoom;
+    const viewLeft = container.scrollLeft;
+    const viewWidth = container.clientWidth;
+    if (playheadPx > viewLeft + viewWidth - 40 || playheadPx < viewLeft) {
+      container.scrollLeft = Math.max(0, playheadPx - 60);
+    }
+  }, [currentTime, zoom, isPlaying, isScrubbing]);
 
   // Salto inteligente al siguiente corte (clip)
   const handleJumpNextCut = useCallback(() => {
@@ -372,13 +597,13 @@ export default function Timeline({
       hidden: false,
       clips: []
     };
-    setTracks([...tracks, newTrack]);
+    setTracks((prev) => [...prev, newTrack]);
   };
 
   // Eliminar una pista si hay más de una
   const handleDeleteTrack = (trackId) => {
     if (tracks.length <= 1) return;
-    setTracks(tracks.filter((t) => t.id !== trackId));
+    setTracks((prev) => prev.filter((t) => t.id !== trackId));
     setSelectedClipId(null);
   };
 
@@ -400,14 +625,15 @@ export default function Timeline({
         }
 
         // Snapping al cabezal
-        if (Math.abs(newStart - currentTime) < snapThreshold) {
-          newStart = currentTime;
+        const playheadTime = currentTimeRef.current;
+        if (Math.abs(newStart - playheadTime) < snapThreshold) {
+          newStart = playheadTime;
         }
 
         // Snapping Magnético con los extremos de otros clips
         if (isMagnetic) {
           const draggedDuration = draggingClip.duration || 0;
-          tracks.forEach((tr) => {
+          tracksRef.current.forEach((tr) => {
             tr.clips.forEach((other) => {
               if (other.id === draggingClip.id) return;
               const otherStart = other.start;
@@ -487,9 +713,9 @@ export default function Timeline({
         let snapPoints = [];
         if (isMagnetic) {
           // Cabezal
-          snapPoints.push({ time: currentTime, label: 'Cabezal de tiempo', type: 'playhead' });
+          snapPoints.push({ time: currentTimeRef.current, label: 'Cabezal de tiempo', type: 'playhead' });
           // Extremos de todos los otros clips
-          tracks.forEach((tr) => {
+          tracksRef.current.forEach((tr) => {
             tr.clips.forEach((other) => {
               if (other.id === trimmingClip.id) return;
               const isAudio = other.type === 'audio';
@@ -863,11 +1089,67 @@ export default function Timeline({
     );
   };
 
+  // Copiar el clip seleccionado al portapapeles interno
+  const handleCopyClip = () => {
+    if (!selectedClipId) return;
+    for (const t of tracks) {
+      const clip = t.clips.find((c) => c.id === selectedClipId);
+      if (clip) {
+        clipboardRef.current = { clip, trackId: t.id };
+        return;
+      }
+    }
+  };
+
+  // Pegar el clip copiado en el cabezal, en su pista original (o la primera si ya no existe)
+  const handlePasteClip = () => {
+    const entry = clipboardRef.current;
+    if (!entry) return;
+    const start = Math.round(currentTime * 100) / 100;
+    const shift = start - entry.clip.start;
+    const newClip = {
+      ...entry.clip,
+      id: 'clip_' + Date.now() + '_' + Math.random().toString(36).substring(7),
+      start,
+      words: Array.isArray(entry.clip.words)
+        ? entry.clip.words.map((w) =>
+            typeof w === 'object' && w.start !== undefined
+              ? { ...w, start: Math.round((w.start + shift) * 100) / 100, end: Math.round((w.end + shift) * 100) / 100 }
+              : w
+          )
+        : entry.clip.words
+    };
+    setTracks((prev) => {
+      if (prev.length === 0) return prev;
+      const targetId = prev.some((t) => t.id === entry.trackId) ? entry.trackId : prev[0].id;
+      return prev.map((t) => (t.id === targetId ? { ...t, clips: [...t.clips, newClip] } : t));
+    });
+    setSelectedClipId(newClip.id);
+  };
+
+  // Recortar el clip seleccionado hasta el cabezal: 'left' elimina lo anterior, 'right' lo posterior (Q / W en CapCut)
+  const handleTrimToPlayhead = (side) => {
+    if (!selectedClipId) return;
+    const t0 = currentTime;
+    setTracks((prev) =>
+      prev.map((t) => {
+        const clip = t.clips.find((c) => c.id === selectedClipId);
+        if (!clip) return t;
+        const end = clip.start + clip.duration;
+        if (t0 <= clip.start + 0.05 || t0 >= end - 0.05) return t;
+        const { firstClip, secondClip } = splitClipAtTime(clip, t0);
+        const kept = side === 'left' ? { ...secondClip, id: clip.id } : firstClip;
+        return { ...t, clips: t.clips.map((c) => (c.id === clip.id ? kept : c)) };
+      })
+    );
+  };
+
   // Atajos de teclado
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (isTypingTarget(e.target)) return;
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
         handleDeleteClip();
       } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
@@ -878,6 +1160,20 @@ export default function Timeline({
       } else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault();
         handleDuplicateClip();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        handleCopyClip();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault();
+        handlePasteClip();
+      } else if (!e.ctrlKey && !e.metaKey && (e.key === 'q' || e.key === 'Q')) {
+        e.preventDefault();
+        handleTrimToPlayhead('left');
+      } else if (!e.ctrlKey && !e.metaKey && (e.key === 'w' || e.key === 'W')) {
+        e.preventDefault();
+        handleTrimToPlayhead('right');
+      } else if (e.key === 'Escape') {
+        setSelectedClipId(null);
       } else if (e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
         handleFitTimeline();
@@ -951,9 +1247,27 @@ export default function Timeline({
           </button>
 
           <button
+            onClick={() => handleTrimToPlayhead('left')}
+            disabled={!selectedClipId}
+            title="Eliminar la parte del clip antes del cabezal (Q)"
+            className="flex items-center px-2 py-1 rounded bg-[#202027] hover:bg-[#2b2b35] text-gray-300 disabled:opacity-30 text-xs font-medium transition-colors"
+          >
+            <ArrowLeftToLine className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            onClick={() => handleTrimToPlayhead('right')}
+            disabled={!selectedClipId}
+            title="Eliminar la parte del clip después del cabezal (W)"
+            className="flex items-center px-2 py-1 rounded bg-[#202027] hover:bg-[#2b2b35] text-gray-300 disabled:opacity-30 text-xs font-medium transition-colors"
+          >
+            <ArrowRightToLine className="w-3.5 h-3.5" />
+          </button>
+
+          <button
             onClick={handleDuplicateClip}
             disabled={!selectedClipId}
-            title="Duplicar clip seleccionado"
+            title="Duplicar clip seleccionado (Ctrl+D)"
             className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-[#202027] hover:bg-[#2b2b35] text-gray-300 disabled:opacity-30 text-xs font-medium transition-colors"
           >
             <Copy className="w-3.5 h-3.5" />
@@ -1090,7 +1404,7 @@ export default function Timeline({
                 <button
                   type="button"
                   onClick={() => {
-                    setTracks(tracks.map((t) => t.id === track.id ? { ...t, muted: !t.muted } : t));
+                    setTracks((prev) => prev.map((t) => t.id === track.id ? { ...t, muted: !t.muted } : t));
                   }}
                   title={track.muted ? 'Activar sonido de la pista' : 'Silenciar pista (Mute)'}
                   className={`p-1 rounded transition-colors ${
@@ -1106,7 +1420,7 @@ export default function Timeline({
                 <button
                   type="button"
                   onClick={() => {
-                    setTracks(tracks.map((t) => t.id === track.id ? { ...t, hidden: !t.hidden } : t));
+                    setTracks((prev) => prev.map((t) => t.id === track.id ? { ...t, hidden: !t.hidden } : t));
                   }}
                   title={track.hidden ? 'Mostrar elementos de la pista' : 'Ocultar pista (Hide)'}
                   className={`p-1 rounded transition-colors ${
@@ -1169,184 +1483,15 @@ export default function Timeline({
 
             {/* 2. Pistas Universales */}
             {tracks.map((track) => (
-              <div
+              <TrackLane
                 key={track.id}
-                data-track-id={track.id}
-                className="h-14 border-b border-[#1f1f28] relative bg-[#121217]/40 hover:bg-[#15151c]/60 transition-colors"
-              >
-                {track.clips.map((clip) => {
-                  const left = clip.start * zoom;
-                  const actualWidth = clip.duration * zoom;
-                  const width = Math.max(6, actualWidth);
-                  const isSelected = selectedClipId === clip.id;
-
-                  // Estilo según el tipo de clip dentro de la pista universal
-                  let clipBg = 'bg-[#1b2b36] hover:bg-[#203442] border-[#294c63] text-gray-200';
-                  let icon = <Film className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />;
-
-                  if (clip.type === 'image') {
-                    clipBg = 'bg-[#153430] hover:bg-[#1b433e] border-[#235851] text-teal-100';
-                    icon = <ImageIcon className="w-3.5 h-3.5 text-teal-400 flex-shrink-0" />;
-                  } else if (clip.type === 'audio') {
-                    clipBg = 'bg-[#0f1f2c] hover:bg-[#132838] border-[#1b435a] text-cyan-200';
-                    icon = <Music className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />;
-                  } else if (clip.type === 'text') {
-                    clipBg = 'bg-purple-900/40 hover:bg-purple-900/60 border-purple-800/60 text-purple-200';
-                    icon = <Type className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />;
-                  }
-
-                  return (
-                    <div
-                      key={clip.id}
-                      style={{ left: `${left}px`, width: `${width}px` }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedClipId(clip.id);
-                      }}
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        setSelectedClipId(clip.id);
-                        setDraggingClip({
-                          id: clip.id,
-                          trackId: track.id,
-                          initialMouseX: e.clientX,
-                          initialStart: clip.start,
-                          duration: clip.duration
-                        });
-                      }}
-                      className={`absolute top-2 bottom-2 rounded-lg cursor-grab active:cursor-grabbing border flex items-center px-1 select-none overflow-hidden transition-shadow ${clipBg} ${
-                        isSelected
-                          ? 'border-cyan-400 ring-2 ring-cyan-400/50 shadow-lg shadow-cyan-500/20 text-white z-20'
-                          : ''
-                      }`}
-                    >
-                      {/* Handle izquierdo (solo si hay suficiente espacio para manipularlo) */}
-                      {width >= 20 && (
-                        <div
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            setTrimmingClip({
-                              id: clip.id,
-                              trackId: track.id,
-                              edge: 'left',
-                              initialMouseX: e.clientX,
-                              initialStart: clip.start,
-                              initialDuration: clip.duration,
-                              initialOffset: clip.offset || 0
-                            });
-                          }}
-                          className="absolute left-0 top-0 bottom-0 w-2.5 bg-white/10 hover:bg-cyan-400 cursor-ew-resize rounded-l z-20"
-                        />
-                      )}
-
-                      {/* Forma de onda de audio de alta fidelidad si es clip de sonido */}
-                      {clip.type === 'audio' && (
-                        <div className="absolute inset-0 pointer-events-none overflow-hidden">
-                          <AudioWaveform
-                            clip={clip}
-                            zoom={zoom}
-                            height={48}
-                            color={isSelected ? '#38bdf8' : '#00F0FF'}
-                            muted={track.muted}
-                          />
-                        </div>
-                      )}
-
-                      {/* Mini forma de onda de audio en la parte inferior si es un video */}
-                      {clip.type === 'video' && (
-                        <div className="absolute bottom-0 left-0 right-0 h-4 opacity-50 pointer-events-none overflow-hidden">
-                          <AudioWaveform
-                            clip={clip}
-                            zoom={zoom}
-                            height={16}
-                            color="#38BDF8"
-                            muted={track.muted}
-                          />
-                        </div>
-                      )}
-
-                      {/* Contenido del clip con etiquetas responsivas que no se rompen con zoom mínimo */}
-                      {clip.type === 'text' ? (
-                        <div className="flex items-center px-1.5 w-full h-full pointer-events-none z-10 select-none overflow-hidden">
-                          {width >= 75 && (
-                            <div className="p-0.5 rounded bg-purple-950/70 border border-purple-500/30 flex-shrink-0 mr-1.5 shadow-sm">
-                              <Type className="w-3 h-3 text-purple-300" />
-                            </div>
-                          )}
-                          <span className="text-[11px] font-semibold text-purple-100 truncate flex-1 drop-shadow-sm tracking-wide">
-                            {clip.text || clip.name || 'Subtítulo'}
-                          </span>
-                          {width >= 90 && (
-                            <span className="text-[9px] font-mono text-purple-300/80 ml-1 flex-shrink-0 bg-purple-950/60 px-1 py-0.5 rounded">
-                              {clip.duration.toFixed(1)}s
-                            </span>
-                          )}
-                        </div>
-                      ) : width >= 32 ? (
-                        <div className="flex items-center space-x-1.5 truncate pointer-events-none z-10 flex-1 px-1">
-                          {clip.thumbnail ? (
-                            <img
-                              src={clip.thumbnail}
-                              alt=""
-                              className="w-7 h-7 object-cover rounded flex-shrink-0 border border-black/40 shadow-sm"
-                            />
-                          ) : (
-                            <div className="p-0.5 rounded bg-black/50 backdrop-blur-sm flex-shrink-0">
-                              {icon}
-                            </div>
-                          )}
-                          <div className="truncate flex-1">
-                            <div className="flex items-center space-x-1 truncate">
-                              <span className="text-[11px] font-bold truncate bg-black/60 backdrop-blur-sm px-1 py-0.2 rounded shadow-sm">
-                                {clip.name || clip.text || 'Elemento'}
-                              </span>
-                              {width >= 80 && clip.animIn && clip.animIn !== 'none' && (
-                                <span className="px-1 py-0.2 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded text-[7px] font-mono uppercase backdrop-blur-sm">
-                                  In: {clip.animIn}
-                                </span>
-                              )}
-                            </div>
-                            {width >= 60 && (
-                              <p className="text-[9px] opacity-80 font-mono mt-0.5">
-                                <span className="bg-black/60 backdrop-blur-sm px-1 py-0.2 rounded">
-                                  {clip.duration.toFixed(1)}s
-                                </span>
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ) : width >= 14 ? (
-                        <div className="w-full flex items-center justify-center pointer-events-none z-10 opacity-70">
-                          {icon}
-                        </div>
-                      ) : null}
-
-                      {/* Handle derecho (solo si hay suficiente espacio para manipularlo) */}
-                      {width >= 20 && (
-                        <div
-                          title="Arrastra para recortar/expandir. Doble clic para expandir automáticamente hasta el final del audio/video"
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            handleAutoExpandToEnd(clip);
-                          }}
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            setTrimmingClip({
-                              id: clip.id,
-                              trackId: track.id,
-                              edge: 'right',
-                              initialMouseX: e.clientX,
-                              initialStart: clip.start,
-                              initialDuration: clip.duration
-                            });
-                          }}
-                          className="absolute right-0 top-0 bottom-0 w-2.5 bg-white/10 hover:bg-cyan-400 cursor-ew-resize rounded-r z-20 group-hover:bg-white/20"
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                track={track}
+                zoom={zoom}
+                selectedClipId={trackSelection.get(track.id) || null}
+                onClipMouseDown={handleClipMouseDown}
+                onTrimStart={handleTrimStart}
+                onAutoExpand={handleAutoExpandToEnd}
+              />
             ))}
 
             {/* Guía Magnética Inteligente con Tooltip al llegar exactamente al final del Audio, Video u otro Clip */}

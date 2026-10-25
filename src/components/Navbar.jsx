@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { 
   Play, 
   Pause, 
@@ -10,11 +10,14 @@ import {
   Undo2,
   Redo2,
   Layers,
-  Home
+  Home,
+  Check,
+  Loader2,
+  AlertTriangle
 } from 'lucide-react';
 import { formatTimecode } from '../utils/timeFormat';
 
-export default function Navbar({
+function Navbar({
   projectName,
   setProjectName,
   currentTime,
@@ -24,6 +27,7 @@ export default function Navbar({
   onOpenAutoSubtitles,
   onOpenExport,
   onGoHome,
+  saveState = 'saved',
   canUndo,
   canRedo,
   onUndo,
@@ -81,6 +85,31 @@ export default function Navbar({
             >
               <Redo2 className="w-3.5 h-3.5" />
             </button>
+          </div>
+
+          {/* Estado del autoguardado */}
+          <div
+            className="flex items-center space-x-1 text-[10px] font-medium pl-1"
+            title={saveState === 'error' ? 'No se pudo guardar (almacenamiento lleno)' : 'Autoguardado local'}
+          >
+            {saveState === 'pending' && (
+              <>
+                <Loader2 className="w-3 h-3 text-gray-500 animate-spin" />
+                <span className="text-gray-500">Guardando…</span>
+              </>
+            )}
+            {saveState === 'saved' && (
+              <>
+                <Check className="w-3 h-3 text-emerald-400" />
+                <span className="text-gray-500">Guardado</span>
+              </>
+            )}
+            {saveState === 'error' && (
+              <>
+                <AlertTriangle className="w-3 h-3 text-amber-400" />
+                <span className="text-amber-400">Error al guardar</span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -156,3 +185,5 @@ export default function Navbar({
     </header>
   );
 }
+
+export default memo(Navbar);
