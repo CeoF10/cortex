@@ -9,6 +9,7 @@ import AutoSubtitleModal from './components/AutoSubtitleModal';
 import ExportModal from './components/ExportModal';
 import { SUBTITLE_THEMES, SUBTITLE_BG_MODES } from './utils/presets';
 import { isTypingTarget } from './utils/dom';
+import { findPreviousAdjacentClip, isTransitionableClip, DEFAULT_TRANSITION_DURATION } from '../shared/effects.mjs';
 
 const STORAGE_KEY = 'cortex_projects_v2';
 const LEGACY_STORAGE_KEY = 'capcut_projects_v2';
@@ -740,6 +741,86 @@ export default function App() {
     setCurrentTime(sub.start);
   }, []);
 
+  // --- Filtros ---
+  const selectedClip = useMemo(() => {
+    if (!selectedClipId) return null;
+    for (const t of tracks) {
+      const found = t.clips.find((c) => c.id === selectedClipId);
+      if (found) return found;
+    }
+    return null;
+  }, [tracks, selectedClipId]);
+
+  const updateClipById = useCallback((clipId, fields) => {
+    updateTracks((prev) =>
+      prev.map((t) =>
+        t.clips.some((c) => c.id === clipId)
+          ? { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, ...fields } : c)) }
+          : t
+      )
+    );
+  }, [updateTracks]);
+
+  const handleApplyFilter = useCallback((filterId) => {
+    if (!selectedClip || !isTransitionableClip(selectedClip)) return;
+    updateClipById(selectedClip.id, { filterId, filterIntensity: selectedClip.filterIntensity ?? 1 });
+  }, [selectedClip, updateClipById]);
+
+  const handleApplyFilterToAll = useCallback((filterId) => {
+    updateTracks((prev) =>
+      prev.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => (isTransitionableClip(c) ? { ...c, filterId, filterIntensity: c.filterIntensity ?? 1 } : c))
+      }))
+    );
+  }, [updateTracks]);
+
+  // --- Transiciones ---
+  // Destino: el clip seleccionado si tiene un clip anterior pegado en su pista; si no,
+  // el corte entre clips visuales más cercano al cabezal (a menos de 1 s).
+  const transitionTarget = useMemo(() => {
+    if (selectedClip) {
+      const track = tracks.find((t) => t.clips.some((c) => c.id === selectedClip.id));
+      const prev = track ? findPreviousAdjacentClip(track, selectedClip) : null;
+      if (prev) return { clip: selectedClip, prev };
+    }
+    let best = null;
+    tracks.forEach((track) => {
+      track.clips.forEach((clip) => {
+        const prev = findPreviousAdjacentClip(track, clip);
+        if (!prev) return;
+        const dist = Math.abs(clip.start - currentTime);
+        if (dist < 1 && (!best || dist < best.dist)) best = { clip, prev, dist };
+      });
+    });
+    return best ? { clip: best.clip, prev: best.prev } : null;
+  }, [tracks, selectedClip, currentTime]);
+
+  // Solo cambia de identidad cuando cambia el destino, no con cada frame del cabezal
+  const transitionTargetKey = transitionTarget ? `${transitionTarget.prev.id}>${transitionTarget.clip.id}` : '';
+  const stableTransitionTarget = useMemo(() => transitionTarget, [transitionTargetKey, transitionTarget?.clip, transitionTarget?.prev]);
+
+  const handleApplyTransition = useCallback((type) => {
+    if (!stableTransitionTarget) return;
+    const { clip } = stableTransitionTarget;
+    updateClipById(clip.id, {
+      transition: { type, duration: clip.transition?.duration ?? DEFAULT_TRANSITION_DURATION }
+    });
+  }, [stableTransitionTarget, updateClipById]);
+
+  const handleRemoveTransition = useCallback(() => {
+    if (!stableTransitionTarget) return;
+    updateClipById(stableTransitionTarget.clip.id, { transition: null });
+  }, [stableTransitionTarget, updateClipById]);
+
+  const handleChangeTransitionDuration = useCallback((duration) => {
+    if (!stableTransitionTarget?.clip.transition) return;
+    updateClipById(stableTransitionTarget.clip.id, {
+      transition: { ...stableTransitionTarget.clip.transition, duration }
+    });
+  }, [stableTransitionTarget, updateClipById]);
+
+  const openFiltersTab = useCallback(() => setActiveTab('filters'), []);
   const openSubtitleModal = useCallback(() => setIsSubtitleModalOpen(true), []);
   const closeSubtitleModal = useCallback(() => setIsSubtitleModalOpen(false), []);
   const openExportModal = useCallback(() => setIsExportModalOpen(true), []);
@@ -814,6 +895,13 @@ export default function App() {
           activeBgMode={activeBgMode}
           onChangeBgMode={handleChangeBgMode}
           activeSubtitleId={activeSubtitleId}
+          selectedClip={selectedClip}
+          onApplyFilter={handleApplyFilter}
+          onApplyFilterToAll={handleApplyFilterToAll}
+          transitionTarget={stableTransitionTarget}
+          onApplyTransition={handleApplyTransition}
+          onRemoveTransition={handleRemoveTransition}
+          onChangeTransitionDuration={handleChangeTransitionDuration}
         />
 
         <CanvasPlayer
@@ -834,6 +922,7 @@ export default function App() {
           setTracks={updateTracks}
           totalDuration={totalDuration}
           aspectRatio={aspectRatio}
+          onOpenFilters={openFiltersTab}
         />
       </div>
 

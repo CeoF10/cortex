@@ -21,8 +21,10 @@ import {
   SkipBack,
   SkipForward,
   ArrowLeftToLine,
-  ArrowRightToLine
+  ArrowRightToLine,
+  Shuffle
 } from 'lucide-react';
+import { getTrackTransitions, TRANSITION_BY_ID } from '../../shared/effects.mjs';
 import { formatTimecode } from '../utils/timeFormat';
 import AudioWaveform from './AudioWaveform';
 import { isTypingTarget } from '../utils/dom';
@@ -46,11 +48,26 @@ const TrackLane = memo(function TrackLane({
   onTrimStart,
   onAutoExpand
 }) {
+  const transitions = useMemo(() => getTrackTransitions(track), [track]);
+
   return (
     <div
       data-track-id={track.id}
       className="h-14 border-b border-[#1f1f28] relative bg-[#121217]/40 hover:bg-[#15151c]/60 transition-colors"
     >
+      {/* Marcadores de transición en cada corte */}
+      {transitions.map((tr) => (
+        <div
+          key={'tr_' + tr.to.id}
+          style={{ left: `${tr.cut * zoom}px`, width: `${Math.max(14, tr.duration * zoom)}px` }}
+          onMouseDown={(e) => onClipMouseDown(e, tr.to, track.id)}
+          onClick={(e) => e.stopPropagation()}
+          title={`Transición: ${TRANSITION_BY_ID.get(tr.type)?.name || tr.type} (${tr.duration.toFixed(1)}s)`}
+          className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 h-5 z-30 rounded-full bg-cyan-400/90 hover:bg-cyan-300 border border-white/70 shadow-md flex items-center justify-center cursor-pointer"
+        >
+          <Shuffle className="w-3 h-3 text-black" />
+        </div>
+      ))}
       {track.clips.map((clip) => {
         const left = clip.start * zoom;
         const actualWidth = clip.duration * zoom;
@@ -886,6 +903,8 @@ export default function Timeline({
       id: secondClipId,
       start: Math.round(splitPoint * 100) / 100,
       duration: secondDuration,
+      // La transición pertenece al corte original, no al nuevo corte creado al dividir
+      transition: null,
       offset: Math.round(((clip.offset || 0) + firstDuration) * 100) / 100
     };
 

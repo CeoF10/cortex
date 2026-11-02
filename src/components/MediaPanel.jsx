@@ -12,8 +12,11 @@ import {
   Clock,
   Check,
   Palette,
-  Sliders
+  Sliders,
+  Wand2,
+  Layers
 } from 'lucide-react';
+import { FiltersTab, TransitionsTab } from './EffectsTabs';
 import { formatDuration } from '../utils/timeFormat';
 import { TEXT_PRESETS, SUBTITLE_THEMES, SUBTITLE_BG_MODES } from '../utils/presets';
 
@@ -32,7 +35,14 @@ function MediaPanel({
   activeThemeId,
   activeBgMode = 'black',
   onChangeBgMode,
-  activeSubtitleId
+  activeSubtitleId,
+  selectedClip,
+  onApplyFilter,
+  onApplyFilterToAll,
+  transitionTarget,
+  onApplyTransition,
+  onRemoveTransition,
+  onChangeTransitionDuration
 }) {
   const [mediaFilter, setMediaFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -82,6 +92,28 @@ function MediaPanel({
         >
           <Sparkles className="w-3.5 h-3.5 text-gray-300" />
           <span>Subtítulos</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('filters')}
+          className={`flex-1 py-3 text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors border-b-2 ${
+            activeTab === 'filters'
+              ? 'text-cyan-400 border-cyan-400 bg-[#16161a]'
+              : 'text-gray-400 border-transparent hover:text-gray-200'
+          }`}
+        >
+          <Wand2 className="w-3.5 h-3.5" />
+          <span>Filtros</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('transitions')}
+          className={`flex-1 py-3 text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors border-b-2 ${
+            activeTab === 'transitions'
+              ? 'text-cyan-400 border-cyan-400 bg-[#16161a]'
+              : 'text-gray-400 border-transparent hover:text-gray-200'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>Transiciones</span>
         </button>
       </div>
 
@@ -395,6 +427,23 @@ function MediaPanel({
             )}
           </div>
         </div>
+      )}
+
+      {activeTab === 'filters' && (
+        <FiltersTab
+          selectedClip={selectedClip}
+          onApplyFilter={onApplyFilter}
+          onApplyFilterToAll={onApplyFilterToAll}
+        />
+      )}
+
+      {activeTab === 'transitions' && (
+        <TransitionsTab
+          transitionTarget={transitionTarget}
+          onApplyTransition={onApplyTransition}
+          onRemoveTransition={onRemoveTransition}
+          onChangeTransitionDuration={onChangeTransitionDuration}
+        />
       )}
     </div>
   );

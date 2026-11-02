@@ -94,11 +94,23 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       webSecurity: false // Permite previsualización nativa de archivos locales
     }
   });
 
   mainWindow.setMenuBarVisibility(false);
+
+  // La app nunca abre ventanas ni navega fuera de sí misma; los enlaces web van al navegador
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+    const isOwnPage = url.startsWith('file://') || (devServerUrl && url.startsWith(devServerUrl)) || url.startsWith('http://localhost:5173/');
+    if (!isOwnPage) event.preventDefault();
+  });
 
   mainWindow.webContents.on('console-message', (event, ...args) => {
     if (event && typeof event === 'object' && event.message !== undefined) {
@@ -137,7 +149,7 @@ app.whenReady().then(() => {
     try {
       const rawPath = request.url.replace(/^media:\/\//, '');
       const filePath = decodeURIComponent(rawPath.startsWith('/') ? rawPath : '/' + rawPath);
-      if (!fs.existsSync(filePath)) {
+      if (!isExistingFile(filePath)) {
         return new Response('Not Found', { status: 404 });
       }
 
@@ -161,10 +173,25 @@ app.whenReady().then(() => {
                        ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
                        'application/octet-stream';
 
-      if (range) {
-        const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const match = range ? /^bytes=(\d*)-(\d*)$/.exec(range.trim()) : null;
+      if (range && !match) {
+        return new Response('Range Not Satisfiable', { status: 416, headers: { 'Content-Range': `bytes */${fileSize}` } });
+      }
+      if (match) {
+        let start;
+        let end;
+        if (match[1] === '') {
+          // Rango sufijo: los últimos N bytes
+          const suffix = parseInt(match[2], 10) || 0;
+          start = Math.max(0, fileSize - suffix);
+          end = fileSize - 1;
+        } else {
+          start = parseInt(match[1], 10);
+          end = match[2] ? Math.min(parseInt(match[2], 10), fileSize - 1) : fileSize - 1;
+        }
+        if (start >= fileSize || start > end) {
+          return new Response('Range Not Satisfiable', { status: 416, headers: { 'Content-Range': `bytes */${fileSize}` } });
+        }
         const chunkSize = (end - start) + 1;
         const nodeStream = fs.createReadStream(filePath, { start, end });
         const webStream = Readable.toWeb(nodeStream);
@@ -207,8 +234,36 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// Solo la ventana propia (archivo local o servidor de desarrollo) puede llamar a la API del sistema
+function isTrustedSender(event) {
+  const url = event.senderFrame?.url || '';
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  return (
+    url.startsWith('file://') ||
+    (devServerUrl && url.startsWith(devServerUrl)) ||
+    url.startsWith('http://localhost:5173/')
+  );
+}
+
+function handle(channel, fn) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!isTrustedSender(event)) {
+      throw new Error(`IPC bloqueado desde un origen no confiable: ${channel}`);
+    }
+    return fn(event, ...args);
+  });
+}
+
+function isExistingFile(p) {
+  try {
+    return typeof p === 'string' && path.isAbsolute(p) && fs.statSync(p).isFile();
+  } catch (e) {
+    return false;
+  }
+}
+
 // IPC: Abrir explorador de archivos
-ipcMain.handle('dialog:openFiles', async (event, options = {}) => {
+handle('dialog:openFiles', async (event, options = {}) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Seleccionar videos, fotos o audios',
     properties: ['openFile', 'multiSelections'],
@@ -262,23 +317,25 @@ async function describeFiles(filePaths) {
 }
 
 // IPC: Describir archivos soltados con arrastrar y soltar
-ipcMain.handle('media:describeFiles', async (event, filePaths) => {
+handle('media:describeFiles', async (event, filePaths) => {
   if (!Array.isArray(filePaths)) return [];
   return describeFiles(filePaths.filter((p) => typeof p === 'string'));
 });
 
 // IPC: Guardar archivo MP4 dialog
-ipcMain.handle('dialog:saveFile', async (event, defaultName = 'mi_video_cortex.mp4') => {
+handle('dialog:saveFile', async (event, defaultName = 'mi_video_cortex.mp4') => {
+  const safeName = path.basename(String(defaultName || 'mi_video_cortex.mp4'));
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Exportar Video',
-    defaultPath: path.join(app.getPath('videos'), defaultName),
+    defaultPath: path.join(app.getPath('videos'), safeName),
     filters: [{ name: 'Video MP4', extensions: ['mp4'] }]
   });
   return result.canceled ? null : result.filePath;
 });
 
 // IPC: Obtener metadatos reales con FFprobe
-ipcMain.handle('media:getMetadata', async (event, filePath) => {
+handle('media:getMetadata', async (event, filePath) => {
+  if (!isExistingFile(filePath)) return { duration: 30, width: 1920, height: 1080, fps: 30 };
   return getProbeMetadata(filePath);
 });
 
@@ -286,8 +343,8 @@ ipcMain.handle('media:getMetadata', async (event, filePath) => {
 const waveformCache = new Map();
 
 // IPC: Extraer ondas de sonido (waveform) de audio o video
-ipcMain.handle('media:getWaveform', async (event, filePath) => {
-  if (!filePath || typeof filePath !== 'string') return [];
+handle('media:getWaveform', async (event, filePath) => {
+  if (!isExistingFile(filePath)) return [];
   if (waveformCache.has(filePath)) return waveformCache.get(filePath);
 
   return new Promise((resolve) => {
@@ -338,8 +395,8 @@ ipcMain.handle('media:getWaveform', async (event, filePath) => {
 
 // IPC: Extraer thumbnail (execFile evita inyección de comandos con rutas que contengan comillas)
 const thumbnailCache = new Map();
-ipcMain.handle('media:extractThumbnail', async (event, filePath) => {
-  if (!filePath || typeof filePath !== 'string') return null;
+handle('media:extractThumbnail', async (event, filePath) => {
+  if (!isExistingFile(filePath)) return null;
   if (thumbnailCache.has(filePath)) return thumbnailCache.get(filePath);
 
   const promise = new Promise((resolve) => {
@@ -358,12 +415,18 @@ ipcMain.handle('media:extractThumbnail', async (event, filePath) => {
 });
 
 // IPC: Subtítulos automáticos con Python + Whisper
-ipcMain.handle('subtitles:transcribe', async (event, { filePath, model = 'base', language = 'es' }) => {
+handle('subtitles:transcribe', async (event, { filePath, model = 'base', language = 'es' }) => {
   return new Promise((resolve) => {
     const scriptPath = path.join(__dirname, '../python/transcribe.py');
     const venvPython = path.join(__dirname, '../python/venv/bin/python');
     const pythonExe = fs.existsSync(venvPython) ? venvPython : 'python3';
-    const args = [scriptPath, '--input', String(filePath), '--model', String(model), '--language', String(language)];
+    if (!isExistingFile(filePath)) {
+      return resolve({ status: 'error', message: 'El archivo a transcribir no existe.' });
+    }
+    const safeModel = /^[a-z0-9.\-]{1,32}$/i.test(String(model)) ? String(model) : 'base';
+    const safeLanguage = /^([a-z]{2,3}|auto)$/i.test(String(language)) ? String(language) : 'es';
+    // --opcion=valor evita que una ruta que empiece por "-" se interprete como otra opción
+    const args = [scriptPath, `--input=${filePath}`, `--model=${safeModel}`, `--language=${safeLanguage}`];
 
     execFile(pythonExe, args, { maxBuffer: 1024 * 1024 * 10 }, (err, stdout) => {
       if (stdout) {
@@ -382,7 +445,21 @@ ipcMain.handle('subtitles:transcribe', async (event, { filePath, model = 'base',
 });
 
 // IPC: Exportación de video nativa ultrarrápida con FFmpeg
-ipcMain.handle('export:start', async (event, options) => {
+// Módulo ES compartido con la interfaz (filtros y transiciones)
+let effectsModulePromise = null;
+function loadEffects() {
+  if (!effectsModulePromise) {
+    effectsModulePromise = import(pathToFileURL(path.join(__dirname, '../shared/effects.mjs')).href);
+  }
+  return effectsModulePromise;
+}
+
+handle('export:start', async (event, options) => {
+  const outputPath = options?.outputPath;
+  if (typeof outputPath !== 'string' || !path.isAbsolute(outputPath) || !/\.mp4$/i.test(outputPath)) {
+    throw new Error('Ruta de exportación no válida (debe ser un archivo .mp4 absoluto).');
+  }
+  const effects = await loadEffects();
   return new Promise((resolve, reject) => {
     try {
       if (currentExportSession) {
@@ -404,7 +481,8 @@ ipcMain.handle('export:start', async (event, options) => {
           if (mainWindow) mainWindow.webContents.send('export:error', error.message);
           currentExportSession = null;
           reject(error);
-        }
+        },
+        effects
       );
     } catch (e) {
       reject(e);
@@ -412,10 +490,10 @@ ipcMain.handle('export:start', async (event, options) => {
   });
 });
 
-ipcMain.handle('export:frame', async () => true);
-ipcMain.handle('export:finish', async () => true);
+handle('export:frame', async () => true);
+handle('export:finish', async () => true);
 
-ipcMain.handle('export:cancel', async () => {
+handle('export:cancel', async () => {
   if (currentExportSession) {
     currentExportSession.cancel();
     currentExportSession = null;
@@ -423,12 +501,13 @@ ipcMain.handle('export:cancel', async () => {
   return true;
 });
 
-ipcMain.handle('shell:showItemInFolder', (event, filePath) => {
+handle('shell:showItemInFolder', (event, filePath) => {
+  if (!isExistingFile(filePath)) return false;
   shell.showItemInFolder(filePath);
   return true;
 });
 
 // IPC: Información de aceleración por GPU
-ipcMain.handle('system:getGpuInfo', async () => {
+handle('system:getGpuInfo', async () => {
   return detectGpuEncoder();
 });

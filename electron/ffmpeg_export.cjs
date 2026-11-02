@@ -206,19 +206,63 @@ function sanitizeAssText(str) {
   return String(str || '').replace(/\{/g, '(').replace(/\}/g, ')');
 }
 
+// Campos numéricos que acaban dentro del filtergraph de FFmpeg: se fuerzan a número para que
+// un proyecto corrupto o manipulado no pueda inyectar filtros (p. ej. movie= para leer archivos).
+const NUMERIC_CLIP_FIELDS = [
+  'start', 'duration', 'offset', 'scale', 'posX', 'posY', 'opacity', 'volume', 'speed',
+  'fadeIn', 'fadeOut', 'animInDuration', 'animOutDuration', 'positionY', 'fontSize', 'strokeWidth',
+  'brightness', 'contrast', 'saturate', 'hue', 'blur', 'vignette', 'filterIntensity'
+];
+const SAFE_ANIM_IDS = new Set(['none', 'fade', 'zoom_in', 'zoom_out', 'bounce', 'slide_right', 'slide_left', 'slide_up', 'slide_down', 'spin', 'shake', 'flash']);
+
+function toFiniteNumber(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function sanitizeClip(clip) {
+  const out = { ...clip };
+  for (const key of NUMERIC_CLIP_FIELDS) {
+    if (out[key] !== undefined && out[key] !== null) {
+      const n = toFiniteNumber(out[key]);
+      if (n === undefined) delete out[key];
+      else out[key] = n;
+    }
+  }
+  out.start = Math.max(0, out.start || 0);
+  out.duration = Math.max(0.05, out.duration || 0.05);
+  out.offset = Math.max(0, out.offset || 0);
+  if (out.scale !== undefined) out.scale = Math.max(0.01, Math.min(20, out.scale));
+  if (out.speed !== undefined) out.speed = Math.max(0.5, Math.min(2, out.speed)); // rango de atempo
+  out.animIn = SAFE_ANIM_IDS.has(out.animIn) ? out.animIn : 'none';
+  out.animOut = SAFE_ANIM_IDS.has(out.animOut) ? out.animOut : 'none';
+  if (out.transition) {
+    out.transition = {
+      type: String(out.transition.type || ''),
+      duration: toFiniteNumber(out.transition.duration)
+    };
+  }
+  out.path = typeof out.path === 'string' ? out.path : undefined;
+  if (out.path && !path.isAbsolute(out.path)) out.path = undefined;
+  return out;
+}
+
 /**
  * Exportador NATIVO ultrarrápido con FFmpeg:
  * Renderiza videos, imágenes PNG superpuestas, audios sincronizados y subtítulos vectoriales con Karaoke
  */
-function exportProjectNatively(options, onProgress, onFinish, onError) {
-  const {
-    outputPath,
-    width = 1920,
-    height = 1080,
-    fps = 30,
-    totalDuration = 10,
-    tracks = []
-  } = options;
+function exportProjectNatively(options, onProgress, onFinish, onError, effects) {
+  const outputPath = options.outputPath;
+  // Dimensiones pares (requisito de yuv420p) y valores acotados
+  const even = (v, d) => Math.max(16, Math.min(8192, Math.round((toFiniteNumber(v) || d) / 2) * 2));
+  const width = even(options.width, 1920);
+  const height = even(options.height, 1080);
+  const fps = Math.max(1, Math.min(120, Math.round(toFiniteNumber(options.fps) || 30)));
+  const totalDuration = toFiniteNumber(options.totalDuration) || 10;
+  const tracks = (Array.isArray(options.tracks) ? options.tracks : []).map((t) => ({
+    ...t,
+    clips: (Array.isArray(t?.clips) ? t.clips : []).map(sanitizeClip)
+  }));
 
   const safeTotalDuration = Math.max(0.1, Number(totalDuration) || 10);
   const tempAssFile = path.join(os.tmpdir(), `cortex_subs_${Date.now()}_${Math.random().toString(36).substring(7)}.ass`);
@@ -239,7 +283,7 @@ function exportProjectNatively(options, onProgress, onFinish, onError) {
       (track.clips || []).forEach((clip) => {
         if (clip.type === 'video' && clip.path && fs.existsSync(clip.path)) {
           if (!isTrackHidden) {
-            visualVideoClips.push({ ...clip, trackMuted: isTrackMuted });
+            visualVideoClips.push({ ...clip, trackMuted: isTrackMuted, trackIndex: tIdx });
           }
           // El audio del video se incluye SOLO SI la pista no está silenciada, el clip no está silenciado y tiene volumen > 0
           if (!isTrackMuted && !clip.muted && (clip.volume === undefined || clip.volume > 0.005)) {
@@ -249,7 +293,7 @@ function exportProjectNatively(options, onProgress, onFinish, onError) {
           }
         } else if (clip.type === 'image' && clip.path && fs.existsSync(clip.path)) {
           if (!isTrackHidden) {
-            visualImageClips.push({ ...clip, trackMuted: isTrackMuted });
+            visualImageClips.push({ ...clip, trackMuted: isTrackMuted, trackIndex: tIdx });
           }
         } else if (clip.type === 'audio' && clip.path && fs.existsSync(clip.path)) {
           if (!isTrackMuted && !clip.muted && (clip.volume === undefined || clip.volume > 0.005)) {
@@ -471,24 +515,16 @@ ${eventsSection}`;
     let inputIndex = 1;
     const clipInputMap = new Map(); // Mapeo de clip.id -> inputIndex para reutilizar inputs
 
-    const videoInputEntries = [];
-    const imageInputEntries = [];
     const audioInputEntries = [];
 
-    // Videos
+    // Videos e imágenes (-loop 1 para que la imagen dure lo que haga falta)
     visualVideoClips.forEach((v) => {
       inputs.push('-i', v.path);
-      const entry = { index: inputIndex, clip: v };
-      videoInputEntries.push(entry);
       clipInputMap.set(v.id, inputIndex);
       inputIndex++;
     });
-
-    // Imágenes superpuestas (-loop 1 para permitir duración libre)
     visualImageClips.forEach((img) => {
       inputs.push('-loop', '1', '-i', img.path);
-      const entry = { index: inputIndex, clip: img };
-      imageInputEntries.push(entry);
       clipInputMap.set(img.id, inputIndex);
       inputIndex++;
     });
@@ -509,58 +545,149 @@ ${eventsSection}`;
       inputIndex++;
     });
 
-    // 4. Composición de video con filtros FFmpeg
-    // A) Videos superpuestos y escalados con soporte para animaciones
-    videoInputEntries.forEach(({ index, clip }, idx) => {
-      const vTag = `v_scaled_${idx}`;
-      const outTag = `v_stage_${idx}`;
-      const offset = clip.offset || 0;
-      const dur = clip.duration;
-      const scale = clip.scale || 1;
+    // 4. Composición de video
+    // Unidades visuales: clips sueltos o cadenas de clips unidos por transiciones (xfade)
+    const blurScale = Math.min(width, height) / 1080;
+    const visualClips = [...visualVideoClips, ...visualImageClips];
+    const visualById = new Map(visualClips.map((c) => [c.id, c]));
 
-      const { filters: extraFilters, xExpr, yExpr, start, end } = buildVisualOverlayConfig(clip, width, height);
+    const transitionIn = new Map(); // clip.id -> par cuya transición entra en este clip
+    const transitionOut = new Map(); // clip.id -> par cuya transición sale de este clip
+    if (effects) {
+      tracks.forEach((track, tIdx) => {
+        if (track.hidden) return;
+        const eligible = { clips: (track.clips || []).filter((c) => visualById.has(c.id)) };
+        effects.getTrackTransitions(eligible).forEach((pair) => {
+          const xf = effects.TRANSITION_BY_ID.get(pair.type);
+          if (!xf) return;
+          const entry = { ...pair, xfade: xf.xfade, trackIndex: tIdx };
+          transitionIn.set(pair.to.id, entry);
+          transitionOut.set(pair.from.id, entry);
+        });
+      });
+    }
 
-      const vFilters = [
-        `trim=start=${offset}:duration=${dur}`,
-        'setpts=PTS-STARTPTS'
-      ];
-
-      if (scale !== 1) {
-        vFilters.push(`scale='min(${width},iw)*${scale}':-1`);
-      } else {
-        vFilters.push(`scale=${width}:${height}:force_original_aspect_ratio=decrease`);
+    const units = [];
+    const chained = new Set();
+    visualClips.forEach((clip) => {
+      if (chained.has(clip.id)) return;
+      if (transitionIn.has(clip.id)) return; // se añade desde el inicio de su cadena
+      if (!transitionOut.has(clip.id)) {
+        units.push({ clips: [clip], type: clip.type, trackIndex: clip.trackIndex });
+        return;
       }
-
-      if (extraFilters.length > 0) {
-        vFilters.push(...extraFilters);
+      const chain = [clip];
+      let cur = clip;
+      while (transitionOut.has(cur.id)) {
+        cur = visualById.get(transitionOut.get(cur.id).to.id);
+        if (!cur || chained.has(cur.id)) break;
+        chain.push(cur);
       }
-
-      filterParts.push(`[${index}:v]${vFilters.join(',')}[${vTag}]`);
-      filterParts.push(
-        `[${currentVideoOut}][${vTag}]overlay=x='${xExpr}':y='${yExpr}':enable='between(t,${start},${end})'[${outTag}]`
-      );
-      currentVideoOut = outTag;
+      chain.forEach((c) => chained.add(c.id));
+      units.push({ clips: chain, type: clip.type, trackIndex: clip.trackIndex });
     });
 
-    // B) Imágenes PNG con transparencia, posición y animaciones fluidas
-    imageInputEntries.forEach(({ index, clip }, idx) => {
-      const imgTag = `img_scaled_${idx}`;
-      const outTag = `img_stage_${idx}`;
+    // Mismo orden de capas que la vista previa: videos debajo, imágenes encima, luego por pista
+    units.sort((a, b) => {
+      if (a.type === 'video' && b.type === 'image') return -1;
+      if (a.type === 'image' && b.type === 'video') return 1;
+      return a.trackIndex - b.trackIndex;
+    });
+
+    // Stream de un clip: recorte, escala, filtro de color y transparencias de animación
+    const buildClipStream = (clip, tag, relative) => {
+      const index = clipInputMap.get(clip.id);
+      const dur = clip.duration;
       const scale = clip.scale || 1;
+      const config = buildVisualOverlayConfig(relative ? { ...clip, start: 0 } : clip, width, height);
+      const f = [];
 
-      const { filters: extraFilters, xExpr, yExpr, start, end } = buildVisualOverlayConfig(clip, width, height);
+      if (clip.type === 'video') {
+        f.push(`trim=start=${clip.offset || 0}:duration=${dur}`);
+      } else {
+        f.push(`trim=duration=${dur}`);
+      }
+      f.push('setpts=PTS-STARTPTS', `fps=${fps}`);
 
-      const imgFilters = [
-        `scale='min(${width},iw)*${scale}':-1`
-      ];
-
-      if (extraFilters.length > 0) {
-        imgFilters.push(...extraFilters);
+      if (clip.type === 'video' && scale === 1) {
+        f.push(`scale=${width}:${height}:force_original_aspect_ratio=decrease`);
+      } else {
+        f.push(`scale='min(${width},iw)*${scale}':-1`);
       }
 
-      filterParts.push(`[${index}:v]${imgFilters.join(',')}[${imgTag}]`);
+      f.push('format=rgba');
+      if (effects) {
+        const params = effects.getClipFilterParams(clip);
+        f.push(...effects.buildFfmpegFilterChain(params, blurScale));
+      }
+      f.push(...config.filters);
+
+      filterParts.push(`[${index}:v]${f.join(',')}[${tag}]`);
+      return config;
+    };
+
+    units.forEach((unit, u) => {
+      const outTag = `vis_stage_${u}`;
+
+      if (unit.clips.length === 1) {
+        const clip = unit.clips[0];
+        const clipTag = `vis_clip_${u}`;
+        const shiftedTag = `vis_shift_${u}`;
+        const { xExpr, yExpr, start, end } = buildClipStream(clip, clipTag, false);
+        // Desplazar los timestamps al inicio del clip para que el overlay muestre el frame correcto
+        filterParts.push(`[${clipTag}]setpts=PTS+${start.toFixed(3)}/TB[${shiftedTag}]`);
+        filterParts.push(
+          `[${currentVideoOut}][${shiftedTag}]overlay=x='${xExpr}':y='${yExpr}':eof_action=pass:enable='between(t,${start},${end})'[${outTag}]`
+        );
+        currentVideoOut = outTag;
+        return;
+      }
+
+      // Cadena con transiciones: cada clip a pantalla completa sobre fondo transparente,
+      // con medio tiempo de transición congelado a cada lado del corte (tpad clone),
+      // y luego xfade entre ellos. La duración total coincide con la línea de tiempo.
+      const fullTags = [];
+      const lengths = [];
+      unit.clips.forEach((clip, i) => {
+        const clipTag = `vis_c${u}_${i}`;
+        const baseTag = `vis_base${u}_${i}`;
+        const fullTag = `vis_full${u}_${i}`;
+        const { xExpr, yExpr } = buildClipStream(clip, clipTag, true);
+        const pre = transitionIn.has(clip.id) ? transitionIn.get(clip.id).duration / 2 : 0;
+        const post = transitionOut.has(clip.id) ? transitionOut.get(clip.id).duration / 2 : 0;
+
+        filterParts.push(`color=c=black@0.0:s=${width}x${height}:r=${fps}:d=${clip.duration.toFixed(3)},format=rgba[${baseTag}]`);
+        const pad = (pre > 0 || post > 0)
+          ? `,tpad=start_duration=${pre.toFixed(3)}:start_mode=clone:stop_duration=${post.toFixed(3)}:stop_mode=clone`
+          : '';
+        filterParts.push(
+          `[${baseTag}][${clipTag}]overlay=x='${xExpr}':y='${yExpr}':eof_action=pass:format=rgb,format=rgba${pad},settb=AVTB[${fullTag}]`
+        );
+        fullTags.push(fullTag);
+        lengths.push(pre + clip.duration + post);
+      });
+
+      let accTag = fullTags[0];
+      let accLen = lengths[0];
+      for (let i = 1; i < fullTags.length; i++) {
+        const tr = transitionIn.get(unit.clips[i].id);
+        const xfTag = `vis_xf${u}_${i}`;
+        const offset = Math.max(0, accLen - tr.duration);
+        filterParts.push(
+          `[${accTag}][${fullTags[i]}]xfade=transition=${tr.xfade}:duration=${tr.duration.toFixed(3)}:offset=${offset.toFixed(3)}[${xfTag}]`
+        );
+        accTag = xfTag;
+        accLen = accLen + lengths[i] - tr.duration;
+      }
+
+      const first = unit.clips[0];
+      const last = unit.clips[unit.clips.length - 1];
+      const chainStart = first.start;
+      const chainEnd = last.start + last.duration;
+      const shiftedTag = `vis_chain${u}`;
+      filterParts.push(`[${accTag}]setpts=PTS-STARTPTS+${chainStart.toFixed(3)}/TB[${shiftedTag}]`);
       filterParts.push(
-        `[${currentVideoOut}][${imgTag}]overlay=x='${xExpr}':y='${yExpr}':enable='between(t,${start},${end})'[${outTag}]`
+        `[${currentVideoOut}][${shiftedTag}]overlay=x=0:y=0:eof_action=pass:enable='between(t,${chainStart},${chainEnd})'[${outTag}]`
       );
       currentVideoOut = outTag;
     });

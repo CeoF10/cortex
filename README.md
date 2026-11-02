@@ -23,6 +23,9 @@ Un editor de video de escritorio moderno, potente y ultrarrápido, construido co
 ### 3. Efectos, Transformaciones y Animaciones
 * **Animaciones de Entrada y Salida:** Soporte para `Fade`, `Bounce`, `Zoom In`, `Zoom Out`, `Slide Up`, `Slide Down`, `Slide Left`, `Slide Right`, `Spin`, `Flash` y `Shake`.
 * **Superposición de Imágenes y Stickers:** Soporte de capas PNG con transparencias, escala libre, opacidad y posicionamiento en pantalla.
+* **20 Filtros de Color:** Vívido, Cálido, Frío, B/N, Noir, Sepia, Vintage, Cine, Desvanecido, Dramático, Atardecer, Océano, Neón, Pastel, Retro 80s, Bosque, Invierno, Negativo, Sueño y Película, con intensidad ajustable y ajustes manuales (brillo, contraste, saturación, tono, viñeta y desenfoque).
+* **20 Transiciones:** Fundido (normal, a negro, a blanco), Disolver, Barridos y Empujes en 4 direcciones, Círculo abrir/cerrar, Aperturas horizontal y vertical, Reloj, Zoom, Pixelar y Comprimir. Se añaden en el corte entre dos clips seguidos de la misma pista, sin cambiar la duración del proyecto.
+* **Vista previa = exportación:** Filtros y transiciones se definen una sola vez (`shared/effects.mjs`) y se traducen a canvas para la vista previa y a FFmpeg (`lutrgb`, `colorchannelmixer`, `vignette`, `xfade`) para la exportación.
 * **Mezcla de Audio:** Control de volumen por clip y por pista, soporte para mute individual y curvas suaves de Fade In / Fade Out.
 
 ### 4. Motor de Exportación Nativo con GPU NVENC

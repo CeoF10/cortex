@@ -12,6 +12,8 @@ import {
 import { formatTimecode } from '../utils/timeFormat';
 import { calculateClipAnimation } from '../utils/animations';
 import { isTypingTarget } from '../utils/dom';
+import { drawTransition, getLayerCanvas } from '../utils/transitions';
+import { getClipFilterParams, buildCssFilter, vignetteDarkness, getTrackTransitions } from '../../shared/effects.mjs';
 
 export default function CanvasPlayer({
   currentTime,
@@ -101,6 +103,13 @@ export default function CanvasPlayer({
               onUpdateClipDuration(clip.id, v.duration);
             }
           };
+          // En pausa el canvas solo se repinta al mover el cabezal: repintar cuando el frame
+          // pedido ya está decodificado (al cargar o tras un seek), si no se queda en negro.
+          const repaintIfPaused = () => {
+            if (v.paused) renderFrameRef.current?.();
+          };
+          v.addEventListener('loadeddata', repaintIfPaused);
+          v.addEventListener('seeked', repaintIfPaused);
           map.set(clip.id, v);
           map.set(src, v);
         } else if (clip.type === 'audio') {
@@ -163,6 +172,144 @@ export default function CanvasPlayer({
     });
   }, [isMuted]);
 
+  // Transiciones activas por pista y ventanas en las que un video debe quedarse congelado
+  // (antes de empezar o después de terminar) porque participa en una transición
+  const transitionsByTrack = useMemo(() => {
+    const map = new Map();
+    tracks.forEach((t) => {
+      const pairs = getTrackTransitions(t);
+      if (pairs.length) map.set(t.id, pairs);
+    });
+    return map;
+  }, [tracks]);
+
+  const holdWindows = useMemo(() => {
+    const map = new Map();
+    transitionsByTrack.forEach((pairs) => {
+      pairs.forEach(({ from, to, cut, duration }) => {
+        const half = duration / 2;
+        map.set(from.id, { ...(map.get(from.id) || {}), after: cut + half });
+        map.set(to.id, { ...(map.get(to.id) || {}), before: cut - half });
+      });
+    });
+    return map;
+  }, [transitionsByTrack]);
+
+  // Tiempo de medio al que congelar un video fuera de su rango durante una transición (o null)
+  const getHeldMediaTime = useCallback((clip, t) => {
+    const win = holdWindows.get(clip.id);
+    if (!win) return null;
+    const offset = clip.offset || 0;
+    if (win.before !== undefined && t >= win.before && t < clip.start) return offset;
+    const end = clip.start + clip.duration;
+    if (win.after !== undefined && t >= end && t < win.after) return offset + Math.max(0, clip.duration - 0.04);
+    return null;
+  }, [holdWindows]);
+
+  // Dibuja un video o imagen con su animación, transformación, filtro de color y viñeta
+  const drawVisualClip = useCallback((ctx, clip, time, width, height) => {
+    const map = mediaElementsRef.current;
+    let mediaEl =
+      map.get(clip.id) ||
+      map.get(clip.url) ||
+      (clip.path ? map.get(clip.path) || map.get('file://' + clip.path) : null);
+
+    if (!mediaEl && clip.url) {
+      try {
+        mediaEl = map.get(decodeURI(clip.url));
+      } catch (e) {}
+    }
+
+    // Auto-crear / cargar imagen si todavía no existe o si no ha terminado de cargar
+    if (clip.type === 'image') {
+      if (!mediaEl) {
+        const src = clip.url || (clip.path ? 'file://' + clip.path : null);
+        if (src) {
+          mediaEl = new Image();
+          if (src.startsWith('http://') || src.startsWith('https://')) {
+            mediaEl.crossOrigin = 'anonymous';
+          }
+          mediaEl.onload = () => renderFrameRef.current?.();
+          mediaEl.onerror = () => console.warn('Error cargando imagen:', src);
+          mediaEl.src = src;
+          map.set(clip.id, mediaEl);
+          map.set(src, mediaEl);
+          if (clip.path) {
+            map.set(clip.path, mediaEl);
+            map.set('file://' + clip.path, mediaEl);
+          }
+        }
+      } else if (!mediaEl.complete) {
+        mediaEl.onload = () => renderFrameRef.current?.();
+      }
+    }
+
+    if (!mediaEl) return;
+    let srcW;
+    let srcH;
+    if (clip.type === 'image') {
+      if (!(mediaEl.complete || mediaEl.naturalWidth > 0)) return;
+      srcW = mediaEl.naturalWidth || 1;
+      srcH = mediaEl.naturalHeight || 1;
+    } else {
+      if (mediaEl.readyState < 2) return;
+      srcW = mediaEl.videoWidth || 1;
+      srcH = mediaEl.videoHeight || 1;
+    }
+
+    const srcAspect = srcW / srcH;
+    const canvasAspect = width / height;
+    let dw = width;
+    let dh = height;
+    if (srcAspect > canvasAspect) {
+      dh = width / srcAspect;
+    } else {
+      dw = height * srcAspect;
+    }
+
+    const relTime = time - clip.start;
+    const anim = calculateClipAnimation(clip, relTime, clip.duration, width, height);
+    const params = getClipFilterParams(clip);
+    params.brightness *= anim.brightness;
+
+    // Con viñeta se pinta en una capa propia para oscurecer solo los píxeles del clip
+    const useLayer = params.vignette > 0.001;
+    const target = useLayer ? getLayerCanvas('vignette', width, height).getContext('2d') : ctx;
+    if (useLayer) target.clearRect(0, 0, width, height);
+
+    target.save();
+    target.filter = buildCssFilter(params);
+    const userScale = clip.scale !== undefined ? clip.scale : 1;
+    const userPosX = clip.posX !== undefined ? (width * clip.posX) / 100 : 0;
+    const userPosY = clip.posY !== undefined ? (height * clip.posY) / 100 : 0;
+
+    target.globalAlpha = Math.max(0, Math.min(1, (clip.opacity ?? 1) * anim.opacity));
+    target.translate(width / 2 + anim.translateX + userPosX, height / 2 + anim.translateY + userPosY);
+    if (anim.rotate) target.rotate(anim.rotate);
+    const finalScale = anim.scale * userScale;
+    if (finalScale !== 1) target.scale(finalScale, finalScale);
+
+    target.drawImage(mediaEl, -dw / 2, -dh / 2, dw, dh);
+
+    if (useLayer) {
+      // Misma curva cos^4 que el filtro vignette de FFmpeg, medida desde el centro del clip
+      target.filter = 'none';
+      target.globalAlpha = 1;
+      target.globalCompositeOperation = 'source-atop';
+      const radius = Math.hypot(dw / 2, dh / 2);
+      const gradient = target.createRadialGradient(0, 0, 0, 0, 0, radius);
+      for (let i = 0; i <= 10; i++) {
+        const r = i / 10;
+        gradient.addColorStop(r, `rgba(0,0,0,${vignetteDarkness(params.vignette, r).toFixed(4)})`);
+      }
+      target.fillStyle = gradient;
+      target.fillRect(-dw / 2, -dh / 2, dw, dh);
+    }
+    target.restore();
+
+    if (useLayer) ctx.drawImage(target.canvas, 0, 0);
+  }, []);
+
   // Render loop del Canvas (recibe tiempo opcional para renderizar con precisión atómica)
   const renderFrame = useCallback((timeOverride = null) => {
     const time = timeOverride !== null ? timeOverride : currentTimeRef.current;
@@ -180,145 +327,57 @@ export default function CanvasPlayer({
     ctx.fillStyle = '#0a0a0c';
     ctx.fillRect(0, 0, width, height);
 
-    // 1. Renderizar pistas visuales (Videos e Imágenes con Animaciones y Superposiciones)
-    const activeVisuals = [];
+    // 1. Pistas visuales (videos e imágenes) con filtros, viñeta y transiciones
+    const items = [];
     tracks.forEach((track, trackIndex) => {
       if (track.hidden) return;
+      const inTransition = new Set();
+      (transitionsByTrack.get(track.id) || []).forEach((tr) => {
+        const half = tr.duration / 2;
+        if (time >= tr.cut - half && time < tr.cut + half) {
+          inTransition.add(tr.from.id);
+          inTransition.add(tr.to.id);
+          items.push({ tr, trackIndex, type: tr.to.type });
+        }
+      });
       track.clips.forEach((clip) => {
         if (
           (clip.type === 'video' || clip.type === 'image') &&
+          !inTransition.has(clip.id) &&
           time >= clip.start &&
           time < clip.start + clip.duration
         ) {
-          activeVisuals.push({ clip, trackIndex });
+          items.push({ clip, trackIndex, type: clip.type });
         }
       });
     });
 
-    // Orden jerárquico de capas:
-    // 1. Videos de fondo se dibujan primero.
-    // 2. Imágenes (PNG con transparencias, stickers, logos, marcas de agua) se dibujan ENCIMA del video.
-    // 3. Si son del mismo tipo, la pista superior (mayor índice) va encima.
-    activeVisuals.sort((a, b) => {
-      if (a.clip.type === 'video' && b.clip.type === 'image') return -1;
-      if (a.clip.type === 'image' && b.clip.type === 'video') return 1;
+    // Orden jerárquico de capas: videos de fondo primero, imágenes (logos, stickers) encima;
+    // a igualdad de tipo, la pista de mayor índice va encima.
+    items.sort((a, b) => {
+      if (a.type === 'video' && b.type === 'image') return -1;
+      if (a.type === 'image' && b.type === 'video') return 1;
       return a.trackIndex - b.trackIndex;
     });
 
-    activeVisuals.forEach(({ clip: activeVisual }) => {
-      let mediaEl =
-        mediaElementsRef.current.get(activeVisual.id) ||
-        mediaElementsRef.current.get(activeVisual.url) ||
-        (activeVisual.path ? mediaElementsRef.current.get(activeVisual.path) : null) ||
-        (activeVisual.path ? mediaElementsRef.current.get('file://' + activeVisual.path) : null);
-
-      if (!mediaEl && activeVisual.url) {
-        try {
-          mediaEl = mediaElementsRef.current.get(decodeURI(activeVisual.url));
-        } catch (e) {}
+    items.forEach((item) => {
+      if (item.clip) {
+        drawVisualClip(ctx, item.clip, time, width, height);
+        return;
       }
-
-      // Auto-crear / cargar imagen si todavía no existe o si no ha terminado de cargar
-      if (activeVisual.type === 'image') {
-        if (!mediaEl) {
-          const src = activeVisual.url || (activeVisual.path ? 'file://' + activeVisual.path : null);
-          if (src) {
-            mediaEl = new Image();
-            if (src.startsWith('http://') || src.startsWith('https://')) {
-              mediaEl.crossOrigin = 'anonymous';
-            }
-            mediaEl.onload = () => renderFrameRef.current?.();
-            mediaEl.onerror = () => console.warn('Error cargando imagen:', src);
-            mediaEl.src = src;
-            mediaElementsRef.current.set(activeVisual.id, mediaEl);
-            mediaElementsRef.current.set(src, mediaEl);
-            if (activeVisual.path) {
-              mediaElementsRef.current.set(activeVisual.path, mediaEl);
-              mediaElementsRef.current.set('file://' + activeVisual.path, mediaEl);
-            }
-          }
-        } else if (!mediaEl.complete) {
-          mediaEl.onload = () => renderFrameRef.current?.();
-        }
-      }
-
-      const relTime = time - activeVisual.start;
-      const anim = calculateClipAnimation(activeVisual, relTime, activeVisual.duration, width, height);
-
-      if (activeVisual.type === 'image' && mediaEl && (mediaEl.complete || mediaEl.naturalWidth > 0)) {
-        const imgAspect = (mediaEl.naturalWidth || 1) / (mediaEl.naturalHeight || 1);
-        const canvasAspect = width / height;
-        let dw = width;
-        let dh = height;
-
-        if (imgAspect > canvasAspect) {
-          dw = width;
-          dh = width / imgAspect;
-        } else {
-          dh = height;
-          dw = height * imgAspect;
-        }
-
-        ctx.save();
-        const b = anim.brightness * (activeVisual.brightness || 1);
-        const c = activeVisual.contrast || 1;
-        const s = activeVisual.saturate || 1;
-        if (b !== 1 || c !== 1 || s !== 1) {
-          ctx.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
-        } else {
-          ctx.filter = 'none';
-        }
-
-        const userScale = activeVisual.scale !== undefined ? activeVisual.scale : 1;
-        const userPosX = activeVisual.posX !== undefined ? (width * activeVisual.posX / 100) : 0;
-        const userPosY = activeVisual.posY !== undefined ? (height * activeVisual.posY / 100) : 0;
-
-        ctx.globalAlpha = Math.max(0, Math.min(1, (activeVisual.opacity ?? 1) * anim.opacity));
-        ctx.translate(width / 2 + anim.translateX + userPosX, height / 2 + anim.translateY + userPosY);
-        if (anim.rotate) ctx.rotate(anim.rotate);
-        const finalScale = anim.scale * userScale;
-        if (finalScale !== 1) ctx.scale(finalScale, finalScale);
-
-        ctx.drawImage(mediaEl, -dw / 2, -dh / 2, dw, dh);
-        ctx.restore();
-
-      } else if (activeVisual.type === 'video' && mediaEl && mediaEl.readyState >= 2) {
-        const vAspect = (mediaEl.videoWidth || 1) / (mediaEl.videoHeight || 1);
-        const canvasAspect = width / height;
-        let dw = width;
-        let dh = height;
-
-        if (vAspect > canvasAspect) {
-          dw = width;
-          dh = width / vAspect;
-        } else {
-          dh = height;
-          dw = height * vAspect;
-        }
-
-        ctx.save();
-        const b = anim.brightness * (activeVisual.brightness || 1);
-        const c = activeVisual.contrast || 1;
-        const s = activeVisual.saturate || 1;
-        if (b !== 1 || c !== 1 || s !== 1) {
-          ctx.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
-        } else {
-          ctx.filter = 'none';
-        }
-
-        const userScale = activeVisual.scale !== undefined ? activeVisual.scale : 1;
-        const userPosX = activeVisual.posX !== undefined ? (width * activeVisual.posX / 100) : 0;
-        const userPosY = activeVisual.posY !== undefined ? (height * activeVisual.posY / 100) : 0;
-
-        ctx.globalAlpha = Math.max(0, Math.min(1, (activeVisual.opacity ?? 1) * anim.opacity));
-        ctx.translate(width / 2 + anim.translateX + userPosX, height / 2 + anim.translateY + userPosY);
-        if (anim.rotate) ctx.rotate(anim.rotate);
-        const finalScale = anim.scale * userScale;
-        if (finalScale !== 1) ctx.scale(finalScale, finalScale);
-
-        ctx.drawImage(mediaEl, -dw / 2, -dh / 2, dw, dh);
-        ctx.restore();
-      }
+      // Transición: cada clip se pinta en su capa (el saliente congela su último frame
+      // y el entrante su primero, igual que el tpad=clone de la exportación)
+      const { from, to, cut, duration, type } = item.tr;
+      const layerA = getLayerCanvas('a', width, height);
+      const layerB = getLayerCanvas('b', width, height);
+      const actx = layerA.getContext('2d');
+      const bctx = layerB.getContext('2d');
+      actx.clearRect(0, 0, width, height);
+      bctx.clearRect(0, 0, width, height);
+      drawVisualClip(actx, from, Math.min(time, from.start + from.duration - 0.001), width, height);
+      drawVisualClip(bctx, to, Math.max(time, to.start), width, height);
+      const progress = (time - (cut - duration / 2)) / duration;
+      drawTransition(ctx, type, layerA, layerB, progress, width, height);
     });
 
     // 2. Renderizar Textos y Subtítulos con Karaoke y colores virales
@@ -449,7 +508,7 @@ export default function CanvasPlayer({
         ctx.restore();
       });
     });
-  }, [tracks, getCanvasDimensions, activeCanvas]);
+  }, [tracks, transitionsByTrack, drawVisualClip, getCanvasDimensions, activeCanvas]);
 
   useEffect(() => {
     renderFrameRef.current = renderFrame;
@@ -473,8 +532,8 @@ export default function CanvasPlayer({
         if (!el) return;
 
         const isInside = currentTime >= clip.start && currentTime < clip.start + clip.duration;
-        if (isInside) {
-          const targetTime = (currentTime - clip.start) + (clip.offset || 0);
+        const targetTime = isInside ? (currentTime - clip.start) + (clip.offset || 0) : getHeldMediaTime(clip, currentTime);
+        if (targetTime !== null) {
           try {
             if (Math.abs(el.currentTime - targetTime) > 0.05) {
               el.currentTime = targetTime;
@@ -484,7 +543,7 @@ export default function CanvasPlayer({
       });
       renderFrame(currentTime);
     }
-  }, [currentTime, isPlaying, allClips, renderFrame]);
+  }, [currentTime, isPlaying, allClips, renderFrame, getHeldMediaTime]);
 
   // Cálculo dinámico de volumen con soporte para Mute de pista, Mute de clip, Fade In y Fade Out
   const computeClipVolume = useCallback((clip, curTime) => {
@@ -624,6 +683,11 @@ export default function CanvasPlayer({
           if (!el.paused) {
             el.pause();
           }
+          // Congelar el primer/último frame si el clip participa en una transición
+          const held = getHeldMediaTime(clip, curTime);
+          if (held !== null && Math.abs(el.currentTime - held) > 0.08) {
+            try { el.currentTime = held; } catch (e) {}
+          }
         }
       });
 
@@ -633,7 +697,7 @@ export default function CanvasPlayer({
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, totalDuration, allClips, isMuted, renderFrame, setCurrentTime, setIsPlaying, computeClipVolume]);
+  }, [isPlaying, totalDuration, allClips, isMuted, renderFrame, setCurrentTime, setIsPlaying, computeClipVolume, getHeldMediaTime]);
 
   // Atajos de teclado profesionales (Espacio, J, K, L, Flechas frame por frame, Mute)
   useEffect(() => {

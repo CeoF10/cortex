@@ -21,13 +21,15 @@ import {
 import { formatDuration } from '../utils/timeFormat';
 import { ANIMATION_LIST } from '../utils/animations';
 import { VIRAL_FONTS, BACKGROUND_PRESETS } from '../utils/presets';
+import { FILTER_PRESETS } from '../../shared/effects.mjs';
 
 function PropertiesPanel({
   selectedClipId,
   tracks,
   setTracks,
   totalDuration,
-  aspectRatio
+  aspectRatio,
+  onOpenFilters
 }) {
   const [activeTab, setActiveTab] = useState('basic'); // 'basic', 'animation', 'filter'
 
@@ -239,10 +241,54 @@ function PropertiesPanel({
           /* PESTAÑA DE FILTROS & COLOR                                   */
           /* ============================================================ */
           <div className="space-y-4">
+            {/* Filtro aplicado (el catálogo está en el panel izquierdo → Filtros) */}
             <div className="bg-[#1a1a22] p-3.5 rounded-xl border border-[#292938] space-y-3">
-              <h4 className="font-bold text-gray-200 text-xs flex items-center space-x-1.5">
-                <Sun className="w-3.5 h-3.5 text-yellow-400" />
-                <span>Ajustes de Imagen / Video</span>
+              <h4 className="font-bold text-gray-200 text-xs flex items-center justify-between">
+                <span className="flex items-center space-x-1.5">
+                  <Palette className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Filtro: {FILTER_PRESETS.find((f) => f.id === (selectedClip.filterId || 'none'))?.name || 'Original'}</span>
+                </span>
+                <button
+                  onClick={() => onOpenFilters?.()}
+                  className="text-[10px] font-semibold text-cyan-400 hover:text-cyan-300"
+                >
+                  Cambiar
+                </button>
+              </h4>
+              {selectedClip.filterId && selectedClip.filterId !== 'none' && (
+                <div>
+                  <div className="flex justify-between text-[11px] text-gray-400 mb-1">
+                    <span>Intensidad</span>
+                    <span className="font-mono text-cyan-400">
+                      {Math.round((selectedClip.filterIntensity ?? 1) * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={selectedClip.filterIntensity ?? 1}
+                    onChange={(e) => updateSelected({ filterIntensity: Number(e.target.value) })}
+                    className="w-full h-1.5 bg-[#282835] rounded appearance-none cursor-pointer accent-cyan-400"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="bg-[#1a1a22] p-3.5 rounded-xl border border-[#292938] space-y-3">
+              <h4 className="font-bold text-gray-200 text-xs flex items-center justify-between">
+                <span className="flex items-center space-x-1.5">
+                  <Sun className="w-3.5 h-3.5 text-yellow-400" />
+                  <span>Ajustes de Imagen / Video</span>
+                </span>
+                <button
+                  onClick={() => updateSelected({ brightness: 1, contrast: 1, saturate: 1, hue: 0, vignette: 0, blur: 0, filterId: 'none', filterIntensity: 1 })}
+                  className="text-[10px] font-semibold text-gray-400 hover:text-white"
+                  title="Quitar filtro y ajustes"
+                >
+                  Restablecer
+                </button>
               </h4>
 
               {/* Brillo */}
@@ -298,6 +344,57 @@ function PropertiesPanel({
                   step="0.05"
                   value={selectedClip.saturate ?? 1}
                   onChange={(e) => updateSelected({ saturate: Number(e.target.value) })}
+                  className="w-full h-1.5 bg-[#282835] rounded appearance-none cursor-pointer accent-cyan-400"
+                />
+              </div>
+
+              {/* Tono */}
+              <div>
+                <div className="flex justify-between text-[11px] text-gray-400 mb-1">
+                  <span>Tono</span>
+                  <span className="font-mono text-cyan-400">{Math.round(selectedClip.hue ?? 0)}°</span>
+                </div>
+                <input
+                  type="range"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  value={selectedClip.hue ?? 0}
+                  onChange={(e) => updateSelected({ hue: Number(e.target.value) })}
+                  className="w-full h-1.5 bg-[#282835] rounded appearance-none cursor-pointer accent-cyan-400"
+                />
+              </div>
+
+              {/* Viñeta */}
+              <div>
+                <div className="flex justify-between text-[11px] text-gray-400 mb-1">
+                  <span>Viñeta</span>
+                  <span className="font-mono text-cyan-400">{Math.round((selectedClip.vignette ?? 0) * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={selectedClip.vignette ?? 0}
+                  onChange={(e) => updateSelected({ vignette: Number(e.target.value) })}
+                  className="w-full h-1.5 bg-[#282835] rounded appearance-none cursor-pointer accent-cyan-400"
+                />
+              </div>
+
+              {/* Desenfoque */}
+              <div>
+                <div className="flex justify-between text-[11px] text-gray-400 mb-1">
+                  <span>Desenfoque</span>
+                  <span className="font-mono text-cyan-400">{(selectedClip.blur ?? 0).toFixed(1)}px</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="12"
+                  step="0.5"
+                  value={selectedClip.blur ?? 0}
+                  onChange={(e) => updateSelected({ blur: Number(e.target.value) })}
                   className="w-full h-1.5 bg-[#282835] rounded appearance-none cursor-pointer accent-cyan-400"
                 />
               </div>
