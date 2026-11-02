@@ -683,9 +683,10 @@ export default function CanvasPlayer({
   return (
     <div
       ref={containerRef}
-      className="flex-1 bg-[#0d0d10] flex flex-col items-center justify-center relative overflow-hidden select-none"
+      className="studio-player flex-1 min-w-0 bg-[#0d0d10] flex flex-col items-center justify-center relative overflow-hidden select-none"
     >
-      <div className="flex-1 w-full h-full flex items-center justify-center p-4 relative">
+      <div className="studio-player-heading"><span>Reproductor</span><span>{aspectRatio} · Vista previa</span></div>
+      <div className="flex-1 min-h-0 w-full flex items-center justify-center p-4 relative">
         <div
           className={`relative max-w-full max-h-full rounded-lg overflow-hidden shadow-2xl bg-black border border-[#23232c] flex items-center justify-center transition-all ${
             aspectRatio === '9:16'

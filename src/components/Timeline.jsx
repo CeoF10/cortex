@@ -1199,7 +1199,7 @@ export default function Timeline({
     <div
       ref={containerRef}
       style={{ height: `${timelineHeight}px` }}
-      className="bg-[#121215] border-t border-[#23232c] flex flex-col select-none relative z-10 flex-shrink-0"
+      className="studio-timeline bg-[#121215] border-t border-[#23232c] flex flex-col select-none relative z-10 flex-shrink-0"
     >
       {/* Barra de redimensionamiento vertical interactiva */}
       <div

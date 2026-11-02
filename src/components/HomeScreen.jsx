@@ -1,215 +1,71 @@
-import React, { useState } from 'react';
-import { 
-  Plus, 
-  FolderOpen, 
-  Film, 
-  Clock, 
-  Trash2, 
-  Copy, 
-  Smartphone, 
-  Monitor, 
-  Sparkles,
-  Layers,
-  Search,
-  ExternalLink
-} from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { Plus, FolderOpen, Film, Clock, Trash2, Copy, Smartphone, Monitor, Sparkles, Search, Home, ArrowUpRight, ChevronRight, Play, HardDrive, LayoutGrid, List } from 'lucide-react';
+import appIcon from '../../assets/cortex-cyan.png';
 import { formatDuration } from '../utils/timeFormat';
 
-export default function HomeScreen({
-  projects,
-  onNewProject,
-  onOpenProject,
-  onDeleteProject,
-  onDuplicateProject
-}) {
-  const [search, setSearch] = useState('');
+const launchers = [
+  { title: 'Horizontal 16:9', detail: 'YouTube, películas y grandes historias.', ratio: '16:9', Icon: Monitor, kind: 'horizontal' },
+  { title: 'Vertical 9:16', detail: 'Reels, TikTok y momentos para compartir.', ratio: '9:16', Icon: Smartphone, kind: 'vertical' },
+  { title: 'Subtítulos con IA', detail: 'Dale voz a tus videos, palabra por palabra.', ratio: '16:9', Icon: Sparkles, kind: 'captions', subtitles: true },
+];
 
-  const filteredProjects = projects.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase())
-  );
+export default function HomeScreen({ projects, onNewProject, onOpenProject, onDeleteProject, onDuplicateProject }) {
+  const [search, setSearch] = useState('');
+  const [section, setSection] = useState('home');
+  const [layout, setLayout] = useState('grid');
+  const contentRef = useRef(null);
+  const visibleProjects = useMemo(() => {
+    const matches = [...projects].filter(p => p.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+    matches.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    return section === 'recent' ? matches.slice(0, 8) : matches;
+  }, [projects, search, section]);
+  const navigate = (next) => {
+    setSection(next);
+    contentRef.current?.scrollTo({ top: 0 });
+  };
 
   return (
-    <div className="w-full h-full bg-[#0d0d10] text-gray-100 flex flex-col select-none overflow-y-auto">
-      {/* Top Banner / Header */}
-      <header className="h-16 border-b border-[#202028] bg-[#121217] flex items-center justify-between px-8">
-        <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-400 to-teal-400 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-            <Layers className="w-5 h-5 text-black font-black" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <span className="font-extrabold text-lg tracking-wider bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
-                CORTEX
-              </span>
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-                PRO DESKTOP
-              </span>
-            </div>
-          </div>
-        </div>
+    <div className="cortex-home">
+      <aside className="home-sidebar">
+        <div className="home-brand"><img src={appIcon} alt="" /><div><strong>CORTEX</strong><span>VIDEO STUDIO</span></div></div>
+        <nav aria-label="Navegación principal">
+          {[['home', Home, 'Inicio'], ['projects', FolderOpen, 'Proyectos'], ['recent', Clock, 'Recientes']].map(([key, Icon, label]) => (
+            <button key={key} className={`home-nav-item ${section === key ? 'is-active' : ''}`} aria-current={section === key ? 'page' : undefined} onClick={() => navigate(key)}>
+              <Icon size={19} /><span>{label}</span>{key === 'projects' && <small>{projects.length}</small>}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-note"><HardDrive size={17} /><div><strong>Tu espacio creativo</strong><span>Proyectos guardados en este equipo</span></div></div>
+        <div className="sidebar-signature"><span />Hecho para crear.</div>
+      </aside>
 
-        {/* Búsqueda de proyectos */}
-        <div className="flex items-center space-x-2 bg-[#1b1b22] px-3 py-1.5 rounded-xl border border-[#2a2a35] w-72">
-          <Search className="w-4 h-4 text-gray-500" />
-          <input
-            type="text"
-            placeholder="Buscar proyecto..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="bg-transparent border-0 outline-none text-xs text-white placeholder-gray-500 w-full"
-          />
-        </div>
-      </header>
+      <div className="home-workspace">
+        <header className="home-topbar">
+          <label className="home-search"><Search size={17} /><input aria-label="Buscar proyectos" placeholder="Buscar tus proyectos…" value={search} onChange={e => setSearch(e.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Limpiar búsqueda">×</button>}</label>
+          <span className="home-topbar-label"><span />CORTEX DESKTOP</span>
+        </header>
+        <main className="home-content" ref={contentRef}>
+          {section === 'home' && !search.trim() && <>
+            <section className="home-hero" aria-labelledby="hero-heading">
+              <div className="hero-copy"><span className="eyebrow">UN NUEVO DÍA. UNA NUEVA HISTORIA.</span><h1 id="hero-heading">Tu próxima historia<br /><em>empieza aquí.</em></h1><p>Une tus ideas. Encuentra tu ritmo.<br />Transforma tus momentos en algo increíble.</p><button className="cortex-primary" onClick={() => onNewProject('16:9')}><Plus size={19} />Nuevo proyecto<ArrowUpRight size={17} /></button><span className="hero-footnote">Tú pones la idea. Cortex, las posibilidades.</span></div>
+              <div className="hero-art" aria-hidden="true"><div className="hero-orbit" /><div className="hero-film"><div className="hero-film-bar"><i /><i /><i /><span>CORTEX / STUDIO</span></div><div className="hero-film-preview"><img src={appIcon} alt="" /><span>Tu historia, en movimiento.</span></div><div className="hero-film-timeline"><div /><div /><div /><span /></div></div><div className="hero-floating-tag"><Play size={12} fill="currentColor" />CREA SIN LÍMITES</div></div>
+            </section>
+            <section className="home-launchers" aria-label="Crear un proyecto">
+              {launchers.map(({ title, detail, ratio, Icon, kind, subtitles }) => <button className="launch-card" key={kind} onClick={() => onNewProject(ratio, !!subtitles)}><div className={`launch-art ${kind}`}><Icon size={kind === 'captions' ? 28 : 34} strokeWidth={1.4} />{kind === 'captions' && <div className="caption-wave">▂▅▃▇▅▂▆▃▅▂</div>}</div><div className="launch-copy"><h2>{title}</h2><p>{detail}</p></div><ChevronRight size={17} /></button>)}
+            </section>
+          </>}
 
-      {/* Hero: Crear Nuevo Proyecto */}
-      <div className="max-w-6xl w-full mx-auto p-8 space-y-8 flex-1">
-        <div className="space-y-4">
-          <h2 className="text-xl font-bold text-gray-100 flex items-center space-x-2">
-            <span>Iniciar Nuevo Proyecto</span>
-          </h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Tarjeta 1: Proyecto Estándar 16:9 */}
-            <div
-              onClick={() => onNewProject('16:9')}
-              className="group relative bg-gradient-to-b from-[#1b1b24] to-[#15151c] hover:from-[#22222e] hover:to-[#1a1a24] border border-[#2a2a38] hover:border-cyan-400/60 rounded-2xl p-6 cursor-pointer transition-all shadow-lg hover:shadow-cyan-500/10 hover:-translate-y-1"
-            >
-              <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mb-4 text-cyan-400 group-hover:scale-110 transition-transform">
-                <Plus className="w-6 h-6" />
-              </div>
-              <h3 className="text-base font-bold text-white mb-1">Nuevo Proyecto Horizontal</h3>
-              <p className="text-xs text-gray-400 mb-3">Formato 16:9 optimizado para YouTube, PC y pantallas horizontales.</p>
-              <span className="inline-flex items-center space-x-1 text-[11px] font-semibold text-cyan-400 font-mono">
-                <Monitor className="w-3.5 h-3.5" />
-                <span>1920 × 1080 (16:9)</span>
-              </span>
-            </div>
-
-            {/* Tarjeta 2: Proyecto Vertical 9:16 (TikTok / Reels) */}
-            <div
-              onClick={() => onNewProject('9:16')}
-              className="group relative bg-gradient-to-b from-[#1b1b24] to-[#15151c] hover:from-[#22222e] hover:to-[#1a1a24] border border-[#2a2a38] hover:border-pink-500/60 rounded-2xl p-6 cursor-pointer transition-all shadow-lg hover:shadow-pink-500/10 hover:-translate-y-1"
-            >
-              <div className="w-12 h-12 rounded-xl bg-pink-500/10 border border-pink-500/30 flex items-center justify-center mb-4 text-pink-400 group-hover:scale-110 transition-transform">
-                <Smartphone className="w-6 h-6" />
-              </div>
-              <h3 className="text-base font-bold text-white mb-1">Nuevo Proyecto Vertical</h3>
-              <p className="text-xs text-gray-400 mb-3">Formato 9:16 perfecto para TikTok, Instagram Reels y YouTube Shorts.</p>
-              <span className="inline-flex items-center space-x-1 text-[11px] font-semibold text-pink-400 font-mono">
-                <Smartphone className="w-3.5 h-3.5" />
-                <span>1080 × 1920 (9:16)</span>
-              </span>
-            </div>
-
-            {/* Tarjeta 3: Subtítulos Automáticos Express */}
-            <div
-              onClick={() => onNewProject('16:9', true)}
-              className="group relative bg-gradient-to-b from-[#1b1b24] to-[#15151c] hover:from-[#22222e] hover:to-[#1a1a24] border border-[#2a2a38] hover:border-purple-500/60 rounded-2xl p-6 cursor-pointer transition-all shadow-lg hover:shadow-purple-500/10 hover:-translate-y-1"
-            >
-              <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center mb-4 text-purple-400 group-hover:scale-110 transition-transform">
-                <Sparkles className="w-6 h-6" />
-              </div>
-              <h3 className="text-base font-bold text-white mb-1">Editor con IA Whisper</h3>
-              <p className="text-xs text-gray-400 mb-3">Inicia con asistencia de subtitulado automático y transcripción local rápida.</p>
-              <span className="inline-flex items-center space-x-1 text-[11px] font-semibold text-purple-400 font-mono">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Transcripción con IA</span>
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Sección: Proyectos Recientes */}
-        <div className="space-y-4 pt-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-bold text-gray-200">
-              Proyectos Recientes ({filteredProjects.length})
-            </h3>
-          </div>
-
-          {filteredProjects.length === 0 ? (
-            <div className="bg-[#141419] border border-dashed border-[#272733] rounded-2xl p-12 text-center text-gray-500 flex flex-col items-center justify-center">
-              <Film className="w-12 h-12 mb-3 text-cyan-400/40" />
-              <p className="text-sm font-semibold text-gray-400">Aún no tienes proyectos guardados</p>
-              <p className="text-xs text-gray-600 mt-1">
-                Haz clic en una de las tarjetas de arriba para comenzar a editar tu primer video.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredProjects.map((project) => (
-                <div
-                  key={project.id}
-                  onClick={() => onOpenProject(project.id)}
-                  className="group bg-[#16161c] hover:bg-[#1d1d25] border border-[#262633] hover:border-cyan-500/60 rounded-xl p-4 cursor-pointer transition-all shadow-md relative flex flex-col justify-between"
-                >
-                  <div>
-                    {/* Thumbnail o Preview */}
-                    <div className="h-32 bg-black/60 rounded-lg mb-3 overflow-hidden flex items-center justify-center border border-white/5 relative">
-                      {project.thumbnail ? (
-                        <img
-                          src={project.thumbnail}
-                          alt={project.name}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <Film className="w-10 h-10 text-cyan-400/50" />
-                      )}
-
-                      <span className="absolute top-2 left-2 bg-black/80 px-2 py-0.5 rounded text-[10px] font-mono text-cyan-400 font-bold border border-cyan-500/20">
-                        {project.aspectRatio || '16:9'}
-                      </span>
-
-                      <span className="absolute bottom-2 right-2 bg-black/80 px-2 py-0.5 rounded text-[10px] font-mono text-white font-medium">
-                        {formatDuration(project.totalDuration || 0)}
-                      </span>
-                    </div>
-
-                    {/* Título e Info */}
-                    <div className="flex items-center justify-between mb-1">
-                      <h4 className="text-sm font-bold text-gray-100 truncate group-hover:text-cyan-400 transition-colors">
-                        {project.name}
-                      </h4>
-                    </div>
-
-                    <div className="flex items-center space-x-3 text-[11px] text-gray-400 font-mono">
-                      <span className="flex items-center space-x-1">
-                        <Clock className="w-3 h-3 text-gray-500" />
-                        <span>{new Date(project.updatedAt).toLocaleDateString()}</span>
-                      </span>
-                      <span>•</span>
-                      <span>{project.clipCount || 0} clips</span>
-                    </div>
-                  </div>
-
-                  {/* Acciones de la tarjeta */}
-                  <div className="flex items-center justify-end space-x-1 pt-3 mt-3 border-t border-[#23232e]">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDuplicateProject(project.id);
-                      }}
-                      title="Duplicar Proyecto"
-                      className="p-1.5 rounded-lg hover:bg-[#282835] text-gray-400 hover:text-white transition-colors"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteProject(project.id);
-                      }}
-                      title="Eliminar Proyecto"
-                      className="p-1.5 rounded-lg hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+          <section className="home-projects" aria-labelledby="projects-heading">
+            <div className="projects-heading"><div><span className="eyebrow">SIGUE DONDE LO DEJASTE</span><h2 id="projects-heading">{search.trim() ? 'Resultados de búsqueda' : section === 'projects' ? 'Tus proyectos' : 'Proyectos recientes'}<span>{visibleProjects.length}</span></h2></div><div className="project-view-controls"><button aria-label="Vista de cuadrícula" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')}><LayoutGrid size={16} /></button><button aria-label="Vista de lista" aria-pressed={layout === 'list'} onClick={() => setLayout('list')}><List size={18} /></button>{section === 'home' && <button className="view-all" onClick={() => navigate('projects')}>Ver todos<ChevronRight size={14} /></button>}</div></div>
+            {visibleProjects.length === 0 ? <div className="home-empty"><div><Film size={29} strokeWidth={1.4} /></div><h3>{search.trim() ? 'No encontramos ese proyecto' : 'El comienzo de una gran historia'}</h3><p>{search.trim() ? 'Prueba con otro nombre o limpia la búsqueda.' : 'Crea tu primer proyecto y empieza a darle forma a tus ideas.'}</p><button className="cortex-primary" onClick={() => search.trim() ? setSearch('') : onNewProject('16:9')}>{search.trim() ? 'Limpiar búsqueda' : 'Crear proyecto'}<Plus size={16} /></button></div> : <div className={`project-collection ${layout === 'list' ? 'is-list' : ''}`}>
+              {visibleProjects.map(project => <article className="project-card" key={project.id}>
+                <button className="project-open" onClick={() => onOpenProject(project.id)} aria-label={`Abrir ${project.name}`}><div className="project-thumbnail">{project.thumbnail ? <img src={project.thumbnail} alt="" loading="lazy" /> : <div className="project-placeholder"><Film size={35} strokeWidth={1.2} /><span>Tu próxima historia</span></div>}<span className="project-ratio">{project.aspectRatio || '16:9'}</span><span className="project-duration">{formatDuration(project.totalDuration || 0)}</span><span className="project-play"><Play size={19} fill="currentColor" /></span></div><div className="project-info"><h3>{project.name}</h3><p>{new Date(project.updatedAt).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' })}<span>·</span>{project.clipCount || 0} clips</p></div></button>
+                <div className="project-actions"><button onClick={() => onDuplicateProject(project.id)} aria-label={`Duplicar ${project.name}`} title="Duplicar proyecto"><Copy size={14} /></button><button className="delete-project" onClick={() => onDeleteProject(project.id)} aria-label={`Eliminar ${project.name}`} title="Eliminar proyecto"><Trash2 size={14} /></button></div>
+              </article>)}
+            </div>}
+          </section>
+          <footer className="home-footer"><span>CORTEX<span className="footer-divider">/</span>Tu creatividad, en movimiento.</span><span>EDITA. CREA. REPITE.</span></footer>
+        </main>
       </div>
     </div>
   );

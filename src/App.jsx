@@ -761,7 +761,7 @@ export default function App() {
   // 2. Si estamos en modo 'editor', mostrar editor de Cortex
   return (
     <div
-      className="w-screen h-screen flex flex-col bg-[#0e0e11] text-gray-100 overflow-hidden font-sans relative"
+      className="cortex-editor w-screen h-screen flex flex-col bg-[#0e0e11] text-gray-100 overflow-hidden font-sans relative"
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -797,7 +797,7 @@ export default function App() {
       />
 
       {/* Área Central: Medios + Reproductor Canvas + Inspector */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="studio-workspace flex-1 flex overflow-hidden">
         <MediaPanel
           activeTab={activeTab}
           setActiveTab={setActiveTab}

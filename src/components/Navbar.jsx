@@ -1,4 +1,5 @@
 import React, { memo } from 'react';
+import appIcon from '../../assets/cortex-cyan.png';
 import { 
   Play, 
   Pause, 
@@ -34,7 +35,7 @@ function Navbar({
   onRedo
 }) {
   return (
-    <header className="h-14 bg-[#141417] border-b border-[#25252b] flex items-center justify-between px-4 select-none z-20">
+    <header className="studio-navbar h-14 bg-[#141417] border-b border-[#25252b] flex items-center justify-between px-4 select-none z-20">
       {/* Brand logo & title */}
       <div className="flex items-center space-x-3">
         {/* Botón Home / Proyectos */}
@@ -48,9 +49,7 @@ function Navbar({
         </button>
 
         <div className="flex items-center space-x-2 pl-2 border-l border-[#2e2e38]">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-cyan-500 to-teal-400 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-            <Layers className="w-4 h-4 text-black font-black" />
-          </div>
+          <img src={appIcon} alt="" className="studio-app-icon" />
           <span className="font-extrabold text-sm tracking-wider text-white">
             CORTEX
           </span>
@@ -168,9 +167,9 @@ function Navbar({
       <div className="flex items-center space-x-3">
         <button
           onClick={onOpenAutoSubtitles}
-          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600/20 to-pink-600/20 hover:from-purple-600/30 hover:to-pink-600/30 text-purple-300 hover:text-purple-100 border border-purple-500/30 text-xs font-medium transition-all shadow-sm"
+          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 hover:text-cyan-100 border border-cyan-500/25 text-xs font-medium transition-all shadow-sm"
         >
-          <Sparkles className="w-3.5 h-3.5 text-pink-400" />
+          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
           <span>Subtítulos IA</span>
         </button>
 

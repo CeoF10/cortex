@@ -47,7 +47,7 @@ function MediaPanel({
   }, [mediaPool, mediaFilter, searchQuery]);
 
   return (
-    <div className="w-80 h-full bg-[#16161a] border-r border-[#24242c] flex flex-col select-none">
+    <div className="studio-media w-80 h-full bg-[#16161a] border-r border-[#24242c] flex flex-col select-none">
       {/* Top tabs */}
       <div className="flex border-b border-[#24242c] bg-[#121215]">
         <button

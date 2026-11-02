@@ -72,7 +72,7 @@ function PropertiesPanel({
   const isVisual = clipType === 'video' || clipType === 'image' || clipType === 'text';
 
   return (
-    <div className="w-80 h-full bg-[#16161a] border-l border-[#24242c] flex flex-col select-none text-xs">
+    <div className="studio-inspector w-80 h-full bg-[#16161a] border-l border-[#24242c] flex flex-col select-none text-xs">
       {/* Header */}
       <div className="p-3 border-b border-[#24242c] flex items-center justify-between">
         <div className="flex items-center space-x-2 text-gray-200 font-bold uppercase tracking-wider text-[11px]">

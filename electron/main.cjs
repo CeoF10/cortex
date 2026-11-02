@@ -88,6 +88,7 @@ function createWindow() {
     minHeight: 700,
     backgroundColor: '#0f0f12',
     title: 'Cortex',
+    icon: path.join(__dirname, '../assets/cortex-cyan.png'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

@@ -133,3 +133,7 @@ O directamente mediante el script de inicio:
 ## Licencia
 
 Este proyecto está bajo la Licencia MIT. Consulta el archivo LICENSE para más detalles.
+
+## Diseño del estudio
+
+La interfaz de Cortex usa paneles oscuros y acentos cian: inicio con navegación lateral, búsqueda, formatos de proyecto, vistas de lista y cuadrícula, y editor con biblioteca, reproductor, inspector y línea de tiempo. El icono seleccionado se encuentra en `assets/cortex-cyan.png`.
