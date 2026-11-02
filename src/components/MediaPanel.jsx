@@ -80,7 +80,7 @@ function MediaPanel({
               : 'text-gray-400 border-transparent hover:text-gray-200'
           }`}
         >
-          <Sparkles className="w-3.5 h-3.5 text-pink-400" />
+          <Sparkles className="w-3.5 h-3.5 text-gray-300" />
           <span>Subtítulos</span>
         </button>
       </div>
@@ -93,7 +93,7 @@ function MediaPanel({
             className="w-full py-2.5 px-3 bg-[#202028] hover:bg-[#282833] border border-dashed border-[#3c3c4a] hover:border-cyan-500 rounded-xl flex items-center justify-center space-x-2 text-xs font-medium text-gray-200 hover:text-cyan-400 transition-all shadow-sm group mb-3"
           >
             <FolderPlus className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
-            <span>Subir Videos, Fotos o Audios</span>
+            <span>Importar</span>
           </button>
 
           <div className="flex items-center space-x-1 mb-2 bg-[#1b1b22] p-1 rounded-lg border border-[#2b2b35]">
@@ -136,7 +136,7 @@ function MediaPanel({
               <div className="h-48 flex flex-col items-center justify-center text-center p-4 text-gray-500">
                 <FolderPlus className="w-10 h-10 mb-2 opacity-40 text-cyan-400" />
                 <p className="text-xs">No hay archivos en la biblioteca</p>
-                <p className="text-[10px] text-gray-600 mt-1">Haz clic en Subir para añadir contenido multimedia</p>
+                <p className="text-[10px] text-gray-600 mt-1">Haz clic en Importar para añadir contenido multimedia</p>
               </div>
             ) : (
               filteredMedia.map((item) => (
@@ -150,7 +150,7 @@ function MediaPanel({
                     ) : item.type === 'image' ? (
                       <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
                     ) : item.type === 'audio' ? (
-                      <Music className="w-6 h-6 text-pink-400 opacity-80" />
+                      <Music className="w-6 h-6 text-gray-300 opacity-80" />
                     ) : (
                       <Film className="w-6 h-6 text-cyan-400 opacity-80" />
                     )}
@@ -363,7 +363,7 @@ function MediaPanel({
           <div className="flex-1 overflow-y-auto pr-1 space-y-2">
             {subtitles.length === 0 ? (
               <div className="h-32 flex flex-col items-center justify-center text-center p-4 text-gray-500">
-                <Sparkles className="w-8 h-8 mb-1 opacity-40 text-pink-400" />
+                <Sparkles className="w-8 h-8 mb-1 opacity-40 text-gray-300" />
                 <p className="text-xs">Sin subtítulos en este proyecto</p>
                 <p className="text-[10px] text-gray-600 mt-0.5">
                   Genera subtítulos con IA o añade texto al video.
