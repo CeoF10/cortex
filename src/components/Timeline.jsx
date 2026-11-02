@@ -228,7 +228,7 @@ export default function Timeline({
   const [draggingClip, setDraggingClip] = useState(null); // { id, trackId, initialMouseX, initialStart, duration }
   const [trimmingClip, setTrimmingClip] = useState(null); // { id, trackId, edge, initialMouseX, initialStart, initialDuration, initialOffset }
 
-  // Modo Magnético CapCut: pegado automático al cortar, eliminar o mover clips (activo por defecto)
+  // Modo Magnético: pegado automático al cortar, eliminar o mover clips (activo por defecto)
   const [isMagnetic, setIsMagnetic] = useState(true);
   const [isSnappingPlayhead, setIsSnappingPlayhead] = useState(false);
   const [snapGuide, setSnapGuide] = useState(null); // { time, label, type } indicador visual magnético al expandir/mover
@@ -298,7 +298,7 @@ export default function Timeline({
         pendingScrollAnchorRef.current = Math.max(0, targetScrollLeft);
         setZoom(nextZoom);
       } else {
-        // Desplazamiento horizontal fluido al girar la rueda del ratón (estilo CapCut / Premiere)
+        // Desplazamiento horizontal fluido al girar la rueda del ratón
         e.preventDefault();
         const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
         container.scrollLeft += delta * 1.25;
@@ -526,7 +526,7 @@ export default function Timeline({
     return map;
   }, [tracks, selectedClipId]);
 
-  // Seguir el cabezal durante la reproducción (paginado, como CapCut)
+  // Seguir el cabezal durante la reproducción (paginado)
   useEffect(() => {
     if (!isPlaying || isScrubbing) return;
     const container = scrollContainerRef.current;
@@ -1028,7 +1028,7 @@ export default function Timeline({
           return { ...t, clips: remaining };
         }
 
-        // Modo Magnético CapCut solo para pistas principales de video: los clips posteriores se desplazan hacia la izquierda
+        // Modo Magnético solo para pistas principales de video: los clips posteriores se desplazan hacia la izquierda
         const delStart = clipToDelete.start;
         const delDuration = clipToDelete.duration;
         const rippled = remaining.map((c) => {
@@ -1127,7 +1127,7 @@ export default function Timeline({
     setSelectedClipId(newClip.id);
   };
 
-  // Recortar el clip seleccionado hasta el cabezal: 'left' elimina lo anterior, 'right' lo posterior (Q / W en CapCut)
+  // Recortar el clip seleccionado hasta el cabezal: 'left' elimina lo anterior, 'right' lo posterior (Q / W)
   const handleTrimToPlayhead = (side) => {
     if (!selectedClipId) return;
     const t0 = currentTime;
@@ -1201,7 +1201,7 @@ export default function Timeline({
       style={{ height: `${timelineHeight}px` }}
       className="bg-[#121215] border-t border-[#23232c] flex flex-col select-none relative z-10 flex-shrink-0"
     >
-      {/* Barra de redimensionamiento vertical interactiva (CapCut drag handle) */}
+      {/* Barra de redimensionamiento vertical interactiva */}
       <div
         onMouseDown={handleStartResizeHeight}
         title="Arrastra para ajustar el alto de la línea de tiempo"
@@ -1276,10 +1276,10 @@ export default function Timeline({
 
           <div className="h-4 w-px bg-[#2b2b35] mx-1" />
 
-          {/* Botón Modo Magnético / Pegado Automático CapCut */}
+          {/* Botón Modo Magnético / Pegado Automático */}
           <button
             onClick={() => setIsMagnetic((prev) => !prev)}
-            title="Modo Magnético CapCut: cuando cortas o eliminas, los clips se pegan automáticamente sin dejar huecos vacíos"
+            title="Modo Magnético: cuando cortas o eliminas, los clips se pegan automáticamente sin dejar huecos vacíos"
             className={`flex items-center space-x-1.5 px-2.5 py-1 rounded text-xs font-semibold transition-all border ${
               isMagnetic
                 ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40 ring-1 ring-cyan-500/30'

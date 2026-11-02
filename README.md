@@ -1,6 +1,6 @@
-# CapCut Desktop Pro
+# Cortex
 
-Un editor de video de escritorio moderno, potente y ultrarrápido inspirado en CapCut, construido con **Electron**, **React**, **Tailwind CSS**, aceleración por hardware con **FFmpeg (NVIDIA NVENC)** y generación de subtítulos automáticos sincronizados por palabra con **OpenAI Faster-Whisper**.
+Un editor de video de escritorio moderno, potente y ultrarrápido, construido con **Electron**, **React**, **Tailwind CSS**, aceleración por hardware con **FFmpeg (NVIDIA NVENC)** y generación de subtítulos automáticos sincronizados por palabra con **OpenAI Faster-Whisper**.
 
 ---
 
@@ -38,7 +38,7 @@ Un editor de video de escritorio moderno, potente y ultrarrápido inspirado en C
 ## Estructura del Proyecto
 
 ```plaintext
-capcut-desktop/
+cortex/
 ├── electron/                 # Backend de la aplicación Electron
 │   ├── main.cjs              # Proceso principal, ventanas y handlers IPC
 │   ├── preload.cjs           # Puente seguro IPC entre frontend y node
@@ -78,8 +78,8 @@ capcut-desktop/
 
 1. Clonar el repositorio:
    ```bash
-   git clone https://github.com/CeoF10/capcut-desktop.git
-   cd capcut-desktop
+   git clone https://github.com/CeoF10/cortex.git
+   cd cortex
    ```
 
 2. Instalar dependencias de Node.js:

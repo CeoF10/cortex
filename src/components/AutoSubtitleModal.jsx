@@ -31,9 +31,9 @@ export default function AutoSubtitleModal({
     setStatusText('Iniciando motor Whisper...');
 
     try {
-      if (window.capcutAPI?.transcribeMedia) {
+      if (window.cortexAPI?.transcribeMedia) {
         setStatusText('Extrayendo audio y procesando con IA...');
-        const res = await window.capcutAPI.transcribeMedia({
+        const res = await window.cortexAPI.transcribeMedia({
           filePath: targetMedia.path,
           model,
           language

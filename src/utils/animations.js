@@ -1,5 +1,5 @@
 /**
- * Motor de Animaciones estilo CapCut
+ * Motor de Animaciones
  * Soporta animaciones de Entrada (In) y Salida (Out) con interpolaciones fluidas
  */
 

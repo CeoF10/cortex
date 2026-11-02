@@ -49,7 +49,7 @@ function WaveformCanvasChunk({
 
     const hasRealPeaks = peaks && peaks.length > 0;
 
-    // Gradiente vertical para aspecto moderno estilo CapCut
+    // Gradiente vertical para aspecto moderno
     const gradient = ctx.createLinearGradient(0, 2, 0, chunkHeight - 2);
     if (muted) {
       gradient.addColorStop(0, '#64748b');
@@ -138,8 +138,8 @@ export default function AudioWaveform({
     }
 
     let isMounted = true;
-    if (window.capcutAPI?.getWaveform) {
-      window.capcutAPI.getWaveform(clip.path).then((peaks) => {
+    if (window.cortexAPI?.getWaveform) {
+      window.cortexAPI.getWaveform(clip.path).then((peaks) => {
         if (!isMounted) return;
         if (peaks && peaks.length > 0) {
           globalWaveformCache.set(clip.path, peaks);

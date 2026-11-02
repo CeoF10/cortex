@@ -6,6 +6,19 @@ const { spawn, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
 const { exportProjectNatively, detectGpuEncoder } = require('./ffmpeg_export.cjs');
 
+// Migrar datos (proyectos guardados en localStorage) de la carpeta del nombre anterior
+(function migrateLegacyUserData() {
+  try {
+    const newDir = app.getPath('userData');
+    const legacyDir = path.join(app.getPath('appData'), 'capcut-desktop');
+    if (!fs.existsSync(newDir) && fs.existsSync(legacyDir)) {
+      fs.cpSync(legacyDir, newDir, { recursive: true });
+    }
+  } catch (e) {
+    console.error('No se pudieron migrar los datos anteriores:', e);
+  }
+})();
+
 // Permitir reproducción inmediata de audio sin bloqueo por falta de interacción inicial
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -74,7 +87,7 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 700,
     backgroundColor: '#0f0f12',
-    title: 'CapCut Desktop',
+    title: 'Cortex',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -254,7 +267,7 @@ ipcMain.handle('media:describeFiles', async (event, filePaths) => {
 });
 
 // IPC: Guardar archivo MP4 dialog
-ipcMain.handle('dialog:saveFile', async (event, defaultName = 'mi_video_capcut.mp4') => {
+ipcMain.handle('dialog:saveFile', async (event, defaultName = 'mi_video_cortex.mp4') => {
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Exportar Video',
     defaultPath: path.join(app.getPath('videos'), defaultName),

@@ -10,7 +10,8 @@ import ExportModal from './components/ExportModal';
 import { SUBTITLE_THEMES, SUBTITLE_BG_MODES } from './utils/presets';
 import { isTypingTarget } from './utils/dom';
 
-const STORAGE_KEY = 'capcut_projects_v2';
+const STORAGE_KEY = 'cortex_projects_v2';
+const LEGACY_STORAGE_KEY = 'capcut_projects_v2';
 const HISTORY_LIMIT = 50;
 const HISTORY_COALESCE_MS = 400;
 const SAVE_DEBOUNCE_MS = 600;
@@ -18,7 +19,7 @@ const SAVE_DEBOUNCE_MS = 600;
 const DEFAULT_PROJECTS = [
   {
     id: 'proj_demo_1',
-    name: 'Mi Primer Video CapCut',
+    name: 'Mi Primer Video',
     aspectRatio: '16:9',
     updatedAt: new Date().toISOString(),
     mediaPool: [],
@@ -115,7 +116,7 @@ export default function App() {
   // Lista de proyectos almacenados en localStorage con sanitización automática de URLs locales
   const [projects, setProjects] = useState(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed.map(sanitizeProject);
@@ -402,7 +403,7 @@ export default function App() {
         const url = normalizeMediaUrl(file.url, file.path);
         let thumbnail = null;
         if (file.type === 'video') {
-          thumbnail = await window.capcutAPI.extractThumbnail(file.path).catch(() => null);
+          thumbnail = await window.cortexAPI.extractThumbnail(file.path).catch(() => null);
         } else if (file.type === 'image') {
           thumbnail = url;
         }
@@ -423,9 +424,9 @@ export default function App() {
 
   // Importar archivos multimedia
   const handleImportFiles = useCallback(async () => {
-    if (window.capcutAPI?.openFiles) {
+    if (window.cortexAPI?.openFiles) {
       try {
-        const files = await window.capcutAPI.openFiles();
+        const files = await window.cortexAPI.openFiles();
         await addFilesToMediaPool(files);
       } catch (err) {
         console.error('Error importando archivos:', err);
@@ -433,7 +434,7 @@ export default function App() {
     } else {
       const mockItem = {
         id: 'mock_' + Date.now(),
-        name: 'Video_Demo_CapCut.mp4',
+        name: 'Video_Demo.mp4',
         type: 'video',
         url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
         path: '/sample/BigBuckBunny.mp4',
@@ -470,7 +471,7 @@ export default function App() {
     e.preventDefault();
     dragDepthRef.current = 0;
     setIsDraggingFiles(false);
-    const api = window.capcutAPI;
+    const api = window.cortexAPI;
     if (!api?.getPathForFile || !api?.describeFiles) return;
     try {
       const paths = Array.from(e.dataTransfer.files).map((f) => api.getPathForFile(f)).filter(Boolean);
@@ -757,7 +758,7 @@ export default function App() {
     );
   }
 
-  // 2. Si estamos en modo 'editor', mostrar CapCut Desktop Editor
+  // 2. Si estamos en modo 'editor', mostrar editor de Cortex
   return (
     <div
       className="w-screen h-screen flex flex-col bg-[#0e0e11] text-gray-100 overflow-hidden font-sans relative"

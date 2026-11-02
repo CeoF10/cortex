@@ -1,7 +1,8 @@
 {
-  "name": "capcut-desktop",
+  "name": "cortex",
+  "productName": "Cortex",
   "version": "1.0.0",
-  "description": "Video Editor Desktop tipo CapCut",
+  "description": "Video Editor Desktop",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
@@ -9,7 +10,7 @@
     "start": "electron .",
     "preview": "vite preview"
   },
-  "keywords": ["video-editor", "capcut", "timeline", "whisper", "ffmpeg"],
+  "keywords": ["video-editor", "timeline", "whisper", "ffmpeg"],
   "author": "",
   "license": "MIT",
   "dependencies": {

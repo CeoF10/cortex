@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Módulo de Transcripción y Generación Automática de Subtítulos tipo CapCut
+Módulo de Transcripción y Generación Automática de Subtítulos
 Utiliza faster-whisper con decodificación de audio directa de 16kHz para máxima compatibilidad y velocidad.
 """
 import sys
@@ -140,7 +140,7 @@ def transcribe_with_faster_whisper(audio_array, model_size="base", language="es"
     return results
 
 def main():
-    parser = argparse.ArgumentParser(description="Auto-subtitle generator for CapCut Desktop")
+    parser = argparse.ArgumentParser(description="Auto-subtitle generator for Cortex")
     parser.add_argument("--input", required=True, help="Path to video or audio file")
     parser.add_argument("--model", default="base", help="Model size: tiny, base, small")
     parser.add_argument("--language", default="es", help="Language code (es, en, etc.) or auto")
@@ -151,7 +151,7 @@ def main():
         print(json.dumps({"status": "error", "message": f"Archivo no encontrado: {input_path}"}))
         sys.exit(1)
 
-    temp_audio = f"/tmp/capcut_audio_{os.getpid()}.wav"
+    temp_audio = f"/tmp/cortex_audio_{os.getpid()}.wav"
     try:
         # Extraer a 16kHz WAV
         if not extract_audio_to_16k_wav(input_path, temp_audio):

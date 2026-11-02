@@ -12,7 +12,7 @@ export default function ExportModal({
 }) {
   const [resolution, setResolution] = useState('1080p');
   const [fps, setFps] = useState(30);
-  const [fileName, setFileName] = useState('mi_video_capcut.mp4');
+  const [fileName, setFileName] = useState('mi_video_cortex.mp4');
   const [isExporting, setIsExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [exportedFilePath, setExportedFilePath] = useState(null);
@@ -20,8 +20,8 @@ export default function ExportModal({
   const [gpuInfo, setGpuInfo] = useState(null);
 
   useEffect(() => {
-    if (isOpen && window.capcutAPI?.getGpuInfo) {
-      window.capcutAPI.getGpuInfo().then((info) => setGpuInfo(info)).catch(() => {});
+    if (isOpen && window.cortexAPI?.getGpuInfo) {
+      window.cortexAPI.getGpuInfo().then((info) => setGpuInfo(info)).catch(() => {});
     }
   }, [isOpen]);
 
@@ -35,8 +35,8 @@ export default function ExportModal({
 
     try {
       let targetPath = null;
-      if (window.capcutAPI?.saveFileDialog) {
-        targetPath = await window.capcutAPI.saveFileDialog(fileName);
+      if (window.cortexAPI?.saveFileDialog) {
+        targetPath = await window.cortexAPI.saveFileDialog(fileName);
         if (!targetPath) {
           setIsExporting(false);
           return;
@@ -67,15 +67,15 @@ export default function ExportModal({
 
       // Escuchar progreso nativo de FFmpeg
       let unsubscribeProgress = null;
-      if (window.capcutAPI?.onExportProgress) {
-        unsubscribeProgress = window.capcutAPI.onExportProgress((p) => {
+      if (window.cortexAPI?.onExportProgress) {
+        unsubscribeProgress = window.cortexAPI.onExportProgress((p) => {
           setProgress(p);
         });
       }
 
       // Iniciar exportación nativa ultrarrápida con FFmpeg
-      if (window.capcutAPI?.startExport) {
-        await window.capcutAPI.startExport({
+      if (window.cortexAPI?.startExport) {
+        await window.cortexAPI.startExport({
           outputPath: targetPath,
           width,
           height,
@@ -110,8 +110,8 @@ export default function ExportModal({
   };
 
   const handleOpenFolder = () => {
-    if (exportedFilePath && window.capcutAPI?.openInFolder) {
-      window.capcutAPI.openInFolder(exportedFilePath);
+    if (exportedFilePath && window.cortexAPI?.openInFolder) {
+      window.cortexAPI.openInFolder(exportedFilePath);
     }
   };
 

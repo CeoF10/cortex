@@ -52,7 +52,7 @@ function Navbar({
             <Layers className="w-4 h-4 text-black font-black" />
           </div>
           <span className="font-extrabold text-sm tracking-wider text-white">
-            CAPCUT
+            CORTEX
           </span>
         </div>
 

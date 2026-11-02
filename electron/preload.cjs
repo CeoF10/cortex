@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-contextBridge.exposeInMainWorld('capcutAPI', {
+contextBridge.exposeInMainWorld('cortexAPI', {
   openFiles: (options) => ipcRenderer.invoke('dialog:openFiles', options),
   // Desde Electron 32, File.path ya no existe: se obtiene la ruta con webUtils
   getPathForFile: (file) => webUtils.getPathForFile(file),

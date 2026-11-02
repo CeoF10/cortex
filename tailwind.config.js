@@ -7,7 +7,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        capcut: {
+        cortex: {
           dark: '#0f0f11',
           darker: '#09090b',
           panel: '#18181b',

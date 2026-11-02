@@ -208,7 +208,7 @@ function MediaPanel({
           </div>
 
           <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-            Plantillas Virales CapCut
+            Plantillas Virales
           </div>
 
           <div className="grid grid-cols-1 gap-2.5">

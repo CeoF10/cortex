@@ -138,7 +138,7 @@ function PropertiesPanel({
           </div>
         ) : activeTab === 'animation' && isVisual ? (
           /* ============================================================ */
-          /* PESTAÑA DE ANIMACIONES (ENTRADA Y SALIDA TIPO CAPCUT)        */
+          /* PESTAÑA DE ANIMACIONES (ENTRADA Y SALIDA)        */
           /* ============================================================ */
           <div className="space-y-5">
             {/* 1. ANIMACIÓN DE ENTRADA (IN) */}

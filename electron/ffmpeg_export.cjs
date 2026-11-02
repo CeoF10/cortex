@@ -221,7 +221,7 @@ function exportProjectNatively(options, onProgress, onFinish, onError) {
   } = options;
 
   const safeTotalDuration = Math.max(0.1, Number(totalDuration) || 10);
-  const tempAssFile = path.join(os.tmpdir(), `capcut_subs_${Date.now()}_${Math.random().toString(36).substring(7)}.ass`);
+  const tempAssFile = path.join(os.tmpdir(), `cortex_subs_${Date.now()}_${Math.random().toString(36).substring(7)}.ass`);
 
   try {
     const scaleFactor = height / 1080;
@@ -442,7 +442,7 @@ function exportProjectNatively(options, onProgress, onFinish, onError) {
       });
 
       const assContent = `[Script Info]
-Title: CapCut Native Export
+Title: Cortex Export
 ScriptType: v4.00+
 PlayResX: ${width}
 PlayResY: ${height}

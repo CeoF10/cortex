@@ -16,8 +16,8 @@ export const VIRAL_FONTS = [
 
 export const TEXT_PRESETS = [
   {
-    id: 'preset_capcut_yellow',
-    name: 'CapCut Viral',
+    id: 'preset_viral_yellow',
+    name: 'Viral Amarillo',
     text: 'TEXTO VIRAL',
     fontSize: 52,
     color: '#FFE600',

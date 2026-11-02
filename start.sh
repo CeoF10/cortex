@@ -1,12 +1,12 @@
 #!/bin/bash
-# Script de inicio nativo para CapCut Desktop
+# Script de inicio nativo para Cortex
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
 ELECTRON="$DIR/node_modules/electron/dist/electron"
 
 notify() {
-  command -v notify-send >/dev/null && notify-send "CapCut" "$1"
+  command -v notify-send >/dev/null && notify-send "Cortex" "$1"
 }
 
 # Si faltan dependencias o el binario de Electron (npm a veces omite el postinstall), repararlos

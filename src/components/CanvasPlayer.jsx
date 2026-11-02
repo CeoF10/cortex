@@ -195,7 +195,7 @@ export default function CanvasPlayer({
       });
     });
 
-    // Orden jerárquico de capas (tipo CapCut profesional):
+    // Orden jerárquico de capas:
     // 1. Videos de fondo se dibujan primero.
     // 2. Imágenes (PNG con transparencias, stickers, logos, marcas de agua) se dibujan ENCIMA del video.
     // 3. Si son del mismo tipo, la pista superior (mayor índice) va encima.
